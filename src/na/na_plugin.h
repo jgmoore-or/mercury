@@ -161,6 +161,9 @@ extern NA_PRIVATE const struct na_class_ops NA_PLUGIN_OPS(cci);
 #ifdef NA_HAS_OFI
 extern NA_PRIVATE const struct na_class_ops NA_PLUGIN_OPS(ofi);
 #endif
+#ifdef NA_HAS_PSM
+extern NA_PRIVATE const struct na_class_ops NA_PLUGIN_OPS(psm);
+#endif
 
 #ifdef __cplusplus
 }
