@@ -12,6 +12,15 @@ fi
 OFI_VERSION=1.11.2
 PREFIX=${RUNNER_TEMP}/${INSTALL_DIR}
 
+# PSM
+if [[ $MERCURY_BUILD_CONFIGURATION == 'Tsan' ]]; then
+  PSM_EXTRA_FLAGS="PSM_DEBUG=1 PSM_SANITIZE=1"
+fi
+if [[ $MERCURY_BUILD_CONFIGURATION == 'Debug' ]]; then
+  PSM_EXTRA_FLAGS="PSM_DEBUG=1"
+fi
+PSM_VERSION=master
+
 set -e
 
 if [[ ${RUNNER_OS} == 'Linux' ]]; then
@@ -38,4 +47,10 @@ if [[ ${RUNNER_OS} == 'Linux' ]]; then
     ./autogen.sh;
   fi
   ./configure --prefix=$PREFIX --disable-usnic --disable-mrail --disable-rstream --disable-perf --disable-efa --disable-psm2 --disable-psm --disable-verbs --disable-shm --disable-static --disable-silent-rules ${OFI_EXTRA_FLAGS} CC="${CC}" CFLAGS="${OFI_CFLAGS}" && make -j2 -s && make install;
+
+  # PSM
+  git clone https://github.com/intel/psm.git psm-${PSM_VERSION};
+  cd psm-${PSM_VERSION};
+  patch -p1 < ${GITHUB_WORKSPACE}/Testing/script/psm_build.patch;
+  make install DESTDIR=$PREFIX ${PSM_EXTRA_FLAGS};
 fi
