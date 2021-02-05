@@ -40,7 +40,7 @@ if [[ ${RUNNER_OS} == 'Linux' ]]; then
     wget https://github.com/ofiwg/libfabric/pull/6509.patch
     patch -p1 < 6509.patch
   else
-    git clone https://github.com/ofiwg/libfabric.git libfabric-${OFI_VERSION};
+    cd $HOME && git clone https://github.com/ofiwg/libfabric.git libfabric-${OFI_VERSION};
     cd libfabric-${OFI_VERSION};
     git fetch origin pull/${OFI_PR}/head:ofi_pr;
     git checkout ofi_pr;
@@ -49,7 +49,7 @@ if [[ ${RUNNER_OS} == 'Linux' ]]; then
   ./configure --prefix=$PREFIX --disable-usnic --disable-mrail --disable-rstream --disable-perf --disable-efa --disable-psm2 --disable-psm --disable-verbs --disable-shm --disable-static --disable-silent-rules ${OFI_EXTRA_FLAGS} CC="${CC}" CFLAGS="${OFI_CFLAGS}" && make -j2 -s && make install;
 
   # PSM
-  git clone https://github.com/intel/psm.git psm-${PSM_VERSION};
+  cd $HOME && git clone https://github.com/intel/psm.git psm-${PSM_VERSION};
   cd psm-${PSM_VERSION};
   patch -p1 < ${GITHUB_WORKSPACE}/Testing/script/psm_build.patch;
   make install DESTDIR=$PREFIX ${PSM_EXTRA_FLAGS};
