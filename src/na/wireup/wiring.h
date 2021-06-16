@@ -17,7 +17,6 @@
 #include <ucp/api/ucp.h>
 
 #include "wiring_compat.h"
-#include "wireup.h"
 
 typedef uint32_t sender_id_t;
 

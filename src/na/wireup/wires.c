@@ -16,7 +16,6 @@
 #include "rxpool.h"
 #include "util.h"
 #include "wiring.h"
-#include "wireup.h"
 
 static sig_atomic_t go = 1;
  

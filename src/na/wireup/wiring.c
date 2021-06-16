@@ -10,7 +10,6 @@
 #include "rxpool.h"
 #include "tag.h"
 #include "util.h"
-#include "wireup.h"
 #include "wiring_impl.h"
 
 struct _wire_state {
