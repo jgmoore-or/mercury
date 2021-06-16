@@ -1,5 +1,5 @@
-#ifndef _TAG_H_
-#define _TAG_H_
+#ifndef TAG_H_
+#define TAG_H_
 
 #include "bits.h"
 
@@ -26,7 +26,7 @@
 #define TAG_CHNL_UNUSED3    SHIFTIN(CHANNEL_UNUSED3, TAG_CHNL_MASK)
 
 /* Extract the sender ID or the channel number from a tag number. */
-#define TAG_GET_ID(_x)      SHIFTOUT(_x, TAG_ID_MASK)
-#define TAG_GET_CHNL(_x)    SHIFTOUT(_x, TAG_CHNL_MASK)
+#define TAG_GET_ID(x)      SHIFTOUT(x, TAG_ID_MASK)
+#define TAG_GET_CHNL(x)    SHIFTOUT(x, TAG_CHNL_MASK)
 
-#endif /* _TAG_H_ */
+#endif /* TAG_H_ */

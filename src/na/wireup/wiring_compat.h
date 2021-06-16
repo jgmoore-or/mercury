@@ -1,5 +1,5 @@
-#ifndef _WIRING_COMPAT_H
-#define _WIRING_COMPAT_H
+#ifndef WIRING_COMPAT_H
+#define WIRING_COMPAT_H
 
 /* `wiring_atomic` stands for the C11 _Atomic type qualification
  * where <stdatomic.h> is available.  Otherwise, it's the empty string.
@@ -27,4 +27,4 @@
 #define wiring_debug_used
 #endif
 
-#endif /* _WIRING_COMPAT_H */
+#endif /* WIRING_COMPAT_H */

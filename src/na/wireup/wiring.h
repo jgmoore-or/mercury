@@ -3,8 +3,8 @@
  * whose data structures and message format are defined here.
  */
 
-#ifndef _WIRES_H_
-#define _WIRES_H_
+#ifndef WIRES_H_
+#define WIRES_H_
 
 #include <assert.h>
 #include <inttypes.h>   /* PRIu32 */
@@ -26,20 +26,20 @@ typedef uint32_t sender_id_t;
 
 #define sender_id_nil SENDER_ID_MAX
 
-struct _wiring;
-typedef struct _wiring wiring_t;
+struct wiring;
+typedef struct wiring wiring_t;
 
-struct _wstorage;
-typedef struct _wstorage wstorage_t;
+struct wstorage;
+typedef struct wstorage wstorage_t;
 
-typedef struct _wiring_lock_bundle {
+typedef struct wiring_lock_bundle {
     void (*lock)(wiring_t *, void *);
     void (*unlock)(wiring_t *, void *);
     bool (*assert_locked)(wiring_t *, void *);
     void *arg;
 } wiring_lock_bundle_t;
 
-typedef struct _wire_id {
+typedef struct wire_id {
     sender_id_t wiring_atomic id;
 } wire_id_t;
 
@@ -49,13 +49,13 @@ typedef enum {
 , wire_ev_reclaimed
 } wire_event_t;
 
-typedef struct _wire_event_info {
+typedef struct wire_event_info {
     wire_event_t event;
     ucp_ep_h ep;
     sender_id_t sender_id;
 } wire_event_info_t;
 
-typedef struct _wire_accept_info {
+typedef struct wire_accept_info {
     const ucp_address_t *addr;
     size_t addrlen;
     wire_id_t wire_id;
@@ -115,7 +115,7 @@ typedef struct wiring_garbage_schedule {
     wiring_garbage_bin_t bin[128];
 } wiring_garbage_schedule_t;
 
-struct _wiring {
+struct wiring {
     wiring_lock_bundle_t lkb;
     wire_accept_cb_t accept_cb;
     void *accept_cb_arg;
@@ -234,4 +234,4 @@ wiring_ref_free(wiring_t *wiring, wiring_ref_t *ref)
                               memory_order_relaxed);
 }
 
-#endif /* _WIRES_H_ */
+#endif /* WIRES_H_ */

@@ -1,14 +1,14 @@
-#ifndef _UTIL_H_
-#define _UTIL_H_
+#ifndef UTIL_H_
+#define UTIL_H_
 
 #include <stdint.h> /* uint8_t */
 #include <unistd.h> /* size_t */
 
-#define NELTS(_a)   (sizeof(_a) / sizeof((_a)[0]))
+#define NELTS(a)   (sizeof(a) / sizeof((a)[0]))
 
 #if defined(__GNUC__)
-#   define wireup_printf_like(_fmt,_firstarg)    \
-    __attribute__((format(printf, _fmt, _firstarg)))
+#   define wireup_printf_like(fmt,firstarg)    \
+    __attribute__((format(printf, fmt, firstarg)))
 #endif
 
 int colon_separated_octets_to_bytes(const char *, uint8_t **, size_t *);
@@ -18,4 +18,4 @@ size_t twice_or_max(size_t);
 void *header_alloc(size_t, size_t, size_t);
 void header_free(size_t, size_t, void *);
 
-#endif /* _UTIL_H_ */
+#endif /* UTIL_H_ */

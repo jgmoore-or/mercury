@@ -31,8 +31,8 @@
  *      @(#)cdefs.h     8.8 (Berkeley) 1/9/95
  */
 
-#ifndef _BITS_H_
-#define _BITS_H_
+#ifndef BITS_H_
+#define BITS_H_
 
 #include <sys/param.h>
 
@@ -41,16 +41,16 @@
  */
 
 /* BIT(n): nth bit, where BIT(0) == 0x1. */
-#define BIT(_n)      \
-    (((uintmax_t)(_n) >= NBBY * sizeof(uintmax_t)) ? 0 : \
-        ((uintmax_t)1 << (uintmax_t)((_n) & (NBBY * sizeof(uintmax_t) - 1))))
+#define BIT(n)      \
+    (((uintmax_t)(n) >= NBBY * sizeof(uintmax_t)) ? 0 : \
+        ((uintmax_t)1 << (uintmax_t)((n) & (NBBY * sizeof(uintmax_t) - 1))))
 
     /* BITS(m, n): bits m through n, m < n. */
-#define BITS(_m, _n)        \
-            ((BIT(MAX((_m), (_n)) + 1) - 1) ^ (BIT(MIN((_m), (_n))) - 1))
+#define BITS(m, n)        \
+            ((BIT(MAX((m), (n)) + 1) - 1) ^ (BIT(MIN((m), (n))) - 1))
 
             /* find least significant bit that is set */
-#define LOWEST_SET_BIT(_mask) ((((_mask) - 1) & (_mask)) ^ (_mask))
+#define LOWEST_SET_BIT(mask) ((((mask) - 1) & (mask)) ^ (mask))
 
 #define PRIuBIT       PRIuMAX
 #define PRIuBITS      PRIuBIT
@@ -58,8 +58,8 @@
 #define PRIxBIT       PRIxMAX
 #define PRIxBITS      PRIxBIT
 
-#define SHIFTOUT(_x, _mask) (((_x) & (_mask)) / LOWEST_SET_BIT(_mask))
-#define SHIFTIN(_x, _mask) ((_x) * LOWEST_SET_BIT(_mask))
-#define SHIFTOUT_MASK(_mask) SHIFTOUT((_mask), (_mask))
+#define SHIFTOUT(x, mask) (((x) & (mask)) / LOWEST_SET_BIT(mask))
+#define SHIFTIN(x, mask) ((x) * LOWEST_SET_BIT(mask))
+#define SHIFTOUT_MASK(mask) SHIFTOUT((mask), (mask))
 
-#endif /* _BITS_H_ */
+#endif /* BITS_H_ */

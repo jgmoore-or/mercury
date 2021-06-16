@@ -12,7 +12,7 @@
 #include "util.h"
 #include "wiring_impl.h"
 
-struct _wire_state {
+struct wire_state {
     const wire_state_t *(*expire)(wiring_t *, wire_t *);
     const wire_state_t *(*wakeup)(wiring_t *, wire_t *);
     const wire_state_t *(*receive)(wiring_t *, wire_t *, const wireup_msg_t *);

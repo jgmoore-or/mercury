@@ -1,5 +1,5 @@
-#ifndef _WIRING_IMPL_H_
-#define _WIRING_IMPL_H_
+#ifndef WIRING_IMPL_H_
+#define WIRING_IMPL_H_
 
 #include <stdint.h> /* uint32_t, uint16_t, uint8_t */
 
@@ -12,7 +12,7 @@ typedef enum {
     , OP_STOP       = 3
 } wireup_op_t;
 
-typedef struct _wireup_msg {
+typedef struct wireup_msg {
     uint32_t sender_id;
     uint16_t op;        // wireup_op_t
     uint16_t addrlen;
@@ -21,18 +21,18 @@ typedef struct _wireup_msg {
 
 const char *wireup_op_string(wireup_op_t);
 
-struct _wire;
-typedef struct _wire wire_t;
+struct wire;
+typedef struct wire wire_t;
 
-struct _wire_state;
-typedef struct _wire_state wire_state_t;
+struct wire_state;
+typedef struct wire_state wire_state_t;
 
-typedef struct _timeout_link {
+typedef struct timeout_link {
     sender_id_t prev, next;
     uint64_t due;
 } timeout_link_t;
 
-typedef struct _timeout_head {
+typedef struct timeout_head {
     sender_id_t first, last;
 } timeout_head_t;
 
@@ -42,7 +42,7 @@ enum {
 , timo_nlinks
 };
 
-struct _wire {
+struct wire {
     timeout_link_t tlink[timo_nlinks];
     const wire_state_t *state;
     ucp_ep_h ep;        /* Endpoint connected to this wire's remote peer */
@@ -59,7 +59,7 @@ struct _wire {
     void *cb_arg;
 };
 
-struct _wstorage {
+struct wstorage {
     sender_id_t first_free;
     timeout_head_t thead[timo_nlinks];
     sender_id_t nwires;
@@ -101,4 +101,4 @@ wiring_free_put(wstorage_t *storage, sender_id_t id)
     storage->first_free = id;
 }
 
-#endif /* _WIRING_IMPL_H_ */
+#endif /* WIRING_IMPL_H_ */

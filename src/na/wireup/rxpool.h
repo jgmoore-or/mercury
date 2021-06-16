@@ -53,7 +53,7 @@ struct rxdesc {
     TAILQ_ENTRY(rxdesc) linkall;
 };
 
-typedef TAILQ_HEAD(_rxdesc_list, rxdesc) rxdesc_list_t;
+typedef TAILQ_HEAD(rxdesc_list, rxdesc) rxdesc_list_t;
 
 struct rxpool {
     ucp_tag_t tag, tag_mask;
