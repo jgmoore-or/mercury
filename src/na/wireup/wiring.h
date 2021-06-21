@@ -43,17 +43,24 @@ typedef struct wire_id {
     sender_id_t wiring_atomic id;
 } wire_id_t;
 
+/* Wire event message types. */
 typedef enum {
-  wire_ev_estd = 0
-, wire_ev_closed
-, wire_ev_reclaimed
+  wire_ev_estd = 0      // wire was established
+, wire_ev_closed        // an established wire was closed
+, wire_ev_reclaimed     // a closed wire was reclaimed
 } wire_event_t;
 
 typedef struct wire_event_info {
-    wire_event_t event;
-    ucp_ep_h ep;
-    sender_id_t sender_id;
+    wire_event_t event;         /* message type */
+    ucp_ep_h ep;                /* local endpoint */
+    sender_id_t sender_id;      /* identifier for the local wire slot */
 } wire_event_info_t;
+
+/* Wire-event callbacks have this type.  When a wire is established, closed,
+ * or reclaimed, wireup calls the user back on an optional callback of this
+ * type.
+ */
+typedef bool (*wire_event_cb_t)(wire_event_info_t, void *);
 
 typedef struct wire_accept_info {
     const ucp_address_t *addr;
@@ -63,10 +70,9 @@ typedef struct wire_accept_info {
     ucp_ep_h ep;
 } wire_accept_info_t;
 
-/* Indication of a wire established or a wire that died. */
-typedef bool (*wire_event_cb_t)(wire_event_info_t, void *);
-
-/* Indication of a new wire accepted from a remote peer. */
+/* When a new wire is accepted from a remote peer, wireup calls the user
+ * back on an optional callback of this type.
+ */
 typedef void *(*wire_accept_cb_t)(wire_accept_info_t, void *,
     wire_event_cb_t *, void **);
 
