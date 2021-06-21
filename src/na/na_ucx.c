@@ -53,12 +53,12 @@ HLOG_OUTLET_SHORT_DEFN(wire_life, all);
  * Local Type and Struct Definition
  */
 
-struct _na_ucx_context;
-typedef struct _na_ucx_context na_ucx_context_t;
+struct na_ucx_context;
+typedef struct na_ucx_context na_ucx_context_t;
 
 typedef struct na_addr na_ucx_addr_t;
 
-typedef struct _address_wire {
+typedef struct address_wire {
     /* `sender_id`, if not nil, is for use only
      * with context `ctx`.
      *
@@ -129,7 +129,7 @@ typedef struct _address_wire {
     HG_QUEUE_HEAD(na_op_id) deferrals;
 } address_wire_t;
 
-typedef struct _address_wire_aseq {
+typedef struct address_wire_aseq {
     address_wire_t *cache;
     hg_util_int32_t enter_mutcnt;
 } address_wire_aseq_t;
@@ -152,7 +152,7 @@ typedef struct {
     ucp_rkey_h rkey;
 } unpacked_rkey_t;
 
-typedef struct _na_mem_handle_header {
+typedef struct na_mem_handle_header {
     uint64_t base_addr;
     uint32_t paylen;
 } na_mem_handle_header_t;
@@ -175,18 +175,18 @@ struct na_mem_handle {
     } handle;
 };
 
-typedef enum _op_status {
+typedef enum op_status {
   op_s_complete = 0
 , op_s_underway
 , op_s_canceled
 , op_s_deferred
 } op_status_t;
 
-typedef struct _op_rxinfo {
+typedef struct op_rxinfo {
     void *buf;
 } op_rxinfo_t;
 
-typedef struct _op_txinfo {
+typedef struct op_txinfo {
     const void *buf;
     uint64_t tag;
     na_size_t buf_size;
@@ -211,7 +211,7 @@ struct na_op_id {
     na_ucx_class_t *nucl;
 };
 
-struct _na_ucx_context {
+struct na_ucx_context {
     wiring_t wiring;
     ucp_worker_h worker;
     na_class_t *nacl;
@@ -254,7 +254,7 @@ struct na_ucx_class {
     hg_atomic_int32_t ncontexts;/* Always 1, for now. */
 };
 
-typedef struct _na_ucx_header {
+typedef struct na_ucx_header {
     sender_id_t sender_id;
 } na_ucx_header_t;
 
@@ -456,14 +456,14 @@ na_cb_type_string(na_cb_type_t ty)
 }
 
 static inline const char *
-get_octet(const void *_buf, na_size_t buf_size, unsigned int idx)
+get_octet(const void *buf_in, na_size_t buf_size, unsigned int idx)
 {
 #define NBUFS 128
     static const char none[] = "--";
     static char s[NBUFS][3];
     static int next = 0;
     const char *result = s[next];
-    const char *buf = _buf;
+    const char *buf = buf_in;
 
     if (idx >= buf_size)
         return none;
@@ -1138,9 +1138,9 @@ na_ucx_context_destroy(na_class_t *nacl, void *context)
 
 static na_return_t
 na_ucx_addr_to_string(na_class_t NA_UNUSED *nacl,
-    char *buf, na_size_t *buflenp, na_addr_t _addr)
+    char *buf, na_size_t *buflenp, na_addr_t addr_in)
 {
-    na_ucx_addr_t *addr = _addr;
+    na_ucx_addr_t *addr = addr_in;
     const char *delim = "";
     char *s = buf;
     size_t i, nempty = *buflenp;
@@ -1262,32 +1262,32 @@ addr_incref(na_ucx_addr_t *addr, const char *reason)
 }
 
 static NA_INLINE na_return_t
-na_ucx_addr_dup(na_class_t NA_UNUSED *nacl, na_addr_t _addr,
+na_ucx_addr_dup(na_class_t NA_UNUSED *nacl, na_addr_t addr_in,
     na_addr_t *new_addr)
 {
-    na_ucx_addr_t *addr = _addr;
+    na_ucx_addr_t *addr = addr_in;
 
-    hlog_fast(addr, "duplicating addr %p", (void *)_addr);
+    hlog_fast(addr, "duplicating addr %p", (void *)addr_in);
 
     addr_incref(addr, __func__);
-    *new_addr = _addr;
+    *new_addr = addr_in;
     return NA_SUCCESS;
 }
 
 static NA_INLINE na_return_t
-na_ucx_addr_free(na_class_t *nacl, na_addr_t _addr)
+na_ucx_addr_free(na_class_t *nacl, na_addr_t addr_in)
 {
     na_ucx_class_t *nucl = na_ucx_class(nacl);
-    na_ucx_addr_t *addr = _addr;
+    na_ucx_addr_t *addr = addr_in;
     wiring_t *wiring = &nucl->context.wiring;
     int NA_DEBUG_USED found;
 
-    hlog_fast(addr, "freeing addr %p", (void *)_addr);
+    hlog_fast(addr, "freeing addr %p", (void *)addr_in);
 
     if (addr_decref(addr, __func__) > 0)
         return NA_SUCCESS; // more references remain, so don't free
 
-    hlog_fast(addr, "destroying addr %p", (void *)_addr);
+    hlog_fast(addr, "destroying addr %p", (void *)addr_in);
 
     assert(addr != nucl->context.self);
 
@@ -1332,18 +1332,18 @@ na_ucx_addr_is_self(na_class_t *nacl, na_addr_t addr)
 }
 
 static NA_INLINE na_size_t
-na_ucx_addr_get_serialize_size(na_class_t NA_UNUSED *nacl, na_addr_t _addr)
+na_ucx_addr_get_serialize_size(na_class_t NA_UNUSED *nacl, na_addr_t addr_in)
 {
-    na_ucx_addr_t *addr = _addr;
+    na_ucx_addr_t *addr = addr_in;
 
     return sizeof(uint16_t) + addr->addrlen;
 }
 
 static na_return_t
 na_ucx_addr_serialize(na_class_t NA_UNUSED *nacl, void *buf,
-    na_size_t buf_size, na_addr_t _addr)
+    na_size_t buf_size, na_addr_t addr_in)
 {
-    na_ucx_addr_t *addr = _addr;
+    na_ucx_addr_t *addr = addr_in;
     uint16_t addrlen;
 
     hlog_fast(addr, "enter serialize buf %p len %zu", buf, buf_size);
@@ -2266,11 +2266,11 @@ na_ucx_mem_handle_get_serialize_size(na_class_t *nacl, na_mem_handle_t mh)
 }
 
 static na_return_t
-na_ucx_mem_handle_serialize(na_class_t *nacl, void *_buf, na_size_t buf_size,
+na_ucx_mem_handle_serialize(na_class_t *nacl, void *buf_in, na_size_t buf_size,
     na_mem_handle_t mh)
 {
     const na_ucx_class_t *nucl = na_ucx_class_const(nacl);
-    char *buf = _buf;
+    char *buf = buf_in;
     void *rkey;
     const size_t hdrlen = sizeof(na_mem_handle_header_t);
     na_mem_handle_header_t hdr = {
@@ -2296,7 +2296,7 @@ na_ucx_mem_handle_serialize(na_class_t *nacl, void *_buf, na_size_t buf_size,
     }
 
     hlog_fast(memh, "%s: header + payload length %zu at %p", __func__,
-        hdrlen + paylen, _buf);
+        hdrlen + paylen, buf_in);
 
     if (UINT32_MAX < paylen) {
         NA_LOG_ERROR("payload too big, %zu bytes", paylen);
