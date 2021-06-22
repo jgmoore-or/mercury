@@ -781,10 +781,17 @@ wire_is_connected(wiring_t *wiring, wire_id_t wid)
     return st->wire[id].state == &state[WIRE_S_LIVE];
 }
 
-/* A caller must hold a reference on the wiring (a wiring_ref_t) to
- * avoid racing with a wiring_enlarge() or wiring_teardown() call
- * to access a slot in the associated-data table before it is
- * relocated or freed.
+/* Return a pointer to the data associated with the wire at slot `wid`.
+ * The associated pointer may be NULL.  If there is not a connected wire
+ * at `wid`, then return the special pointer `wire_data_nil`.
+ *
+ * A caller must hold a reference on the wiring (a wiring_ref_t) to
+ * avoid racing with a wiring_enlarge() or wiring_teardown() call to
+ * access a slot in the associated-data table before it is relocated or
+ * freed.
+ *
+ * There is no need for callers to hold the wiring lock across
+ * `wire_get_data` calls.
  */
 void *
 wire_get_data(wiring_t *wiring, wire_id_t wid)
@@ -801,6 +808,15 @@ wire_get_data(wiring_t *wiring, wire_id_t wid)
     return wiring->assoc[id];
 }
 
+/* Stop the wireup protocol on the wire at local slot `wid`.  If
+ * `orderly` is true, then send the remote peer a message to tell it to
+ * shut down its end of the wire; otherwise, send no message.  Return
+ * `true` if the wire was shut down, `false` if there is no wire at slot
+ * `wid`.
+ *
+ * Note well: the caller must hold the wiring lock.  See `wiring_lock`,
+ * `wiring_unlock`, et cetera.
+ */
 bool
 wireup_stop(wiring_t *wiring, wire_id_t wid, bool orderly)
 {
@@ -953,6 +969,14 @@ wiring_requests_check_status(wiring_t *wiring)
     return false;
 }
 
+/* Initialize `wiring` both to answer and to originate wiring requests
+ * using `worker`.  Reserve `request_sizes` bytes for UCP-private
+ * members of the `ucp_request_t`s used for wireup.  Use the custom lock
+ * implementation `lkb` or else the default implementation if `lkb` is
+ * NULL.  Call `accept_cb`, if it is not NULL, passing `accept_cb_arg`
+ * in the second argument, after accepting a wiring request from a
+ * remote peer.
+ */
 bool
 wiring_init(wiring_t *wiring, ucp_worker_h worker, size_t request_size,
     const wiring_lock_bundle_t *lkb,
@@ -1015,6 +1039,11 @@ wiring_init(wiring_t *wiring, ucp_worker_h worker, size_t request_size,
     return true;
 }
 
+/* Allocate a `wiring_t` and initialize it.  On success, return the new
+ * `wiring_t`.  On failure, return NULL.  All parameters are forwarded
+ * to `wiring_init`; see its documentation for the meaning of the
+ * parameters.
+ */
 wiring_t *
 wiring_create(ucp_worker_h worker, size_t request_size,
     const wiring_lock_bundle_t *lkb,
@@ -1299,6 +1328,9 @@ wireup_send(wiring_t *wiring, wire_t *w)
     return true;
 }
 
+/* Acquire the wiring lock if one was established by
+ * `wiring_create`/`wiring_init`.  Otherwise, do nothing.
+ */
 void
 wiring_lock(wiring_t *wiring)
 {
@@ -1307,6 +1339,9 @@ wiring_lock(wiring_t *wiring)
     (*wiring->lkb.lock)(wiring, wiring->lkb.arg);
 }
 
+/* Release the wiring lock if one was established by
+ * `wiring_create`/`wiring_init`.  Otherwise, do nothing.
+ */
 void
 wiring_unlock(wiring_t *wiring)
 {
@@ -1331,11 +1366,17 @@ wiring_assert_locked_impl(wiring_t *wiring, const char *filename, int lineno)
  * a message to the endpoint telling our wire's Sender ID and our address,
  * `laddr`.
  *
- * If non-NULL, `cb` is called with the argument `cb_arg` whenever the
- * new wire changes state (dead -> established, established -> dead).
- * Calls to `cb` are serialized by `wireup_once()`.
+ * The length of the addresses is given by `laddrlen` and
+ * `raddrlen`.
  *
- * The pointer `data` wire's associated `data`
+ * If non-NULL, wireup calls `cb` with the argument `cb_arg` whenever the
+ * new wire changes state (closed -> established, established -> closed,
+ * closed -> reclaimed).  Calls to `cb` are serialized by `wireup_once()`.
+ *
+ * The wire's associated-data pointer is initialized to `data`.
+ *
+ * Note well: the caller must hold the wiring lock.  See `wiring_lock`,
+ * `wiring_unlock`, et cetera.
  */
 wire_id_t
 wireup_start(wiring_t * const wiring, ucp_address_t *laddr, size_t laddrlen,
@@ -1487,6 +1528,19 @@ wireup_rx_req(wiring_t *wiring, const wireup_msg_t *msg)
         w - &wiring->storage->wire[0], w->id);
 }
 
+/* Poll for and process received wireup messages, update the state of
+ * all wires based on the elapsed time and the messages received,
+ * send any replies or keepalives that are due, and collect disused
+ * resources.
+ *
+ * If any progress was made, return 1.  If no progress was made, and no
+ * error occurred, return 0.  Return -1 on an unrecoverable error.  Note
+ * well: after an unrecoverable error occurs, routines called on the
+ * `wiring_t` will have undefined results.
+ *
+ * Note well: the caller must hold the wiring lock.  See `wiring_lock`,
+ * `wiring_unlock`, et cetera.
+ */
 int
 wireup_once(wiring_t *wiring)
 {
@@ -1547,6 +1601,9 @@ wireup_app_tag(wiring_t wiring_unused *wiring, uint64_t *atagp, uint64_t *maskp)
         *maskp = TAG_CHNL_MASK;
 }
 
+/* Return a string with (static storage duration) that describes `ev`.
+ * If `ev` is unknown, then return "unknown".
+ */
 const char *
 wire_event_string(wire_event_t ev)
 {
@@ -1578,6 +1635,13 @@ wiring_garbage_init(wiring_garbage_schedule_t *sched)
     sched->epoch.first = sched->epoch.last = 0;
 }
 
+/* Initialize the reference `ref` for use by `wiring_ref_get` and
+ * `wiring_ref_put`.  When the caller has finished with `ref`---the
+ * caller will no longer `_get` or `_put` it---then it should call
+ * `wiring_ref_free` to mark it for destruction, later.  Wiring will
+ * call back on `reclaim` when it is time for the user to reclaim
+ * resources tied with `ref`.
+ */
 void
 wiring_ref_init(wiring_t *wiring, wiring_ref_t *ref,
     void (*reclaim)(wiring_ref_t *))

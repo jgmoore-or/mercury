@@ -32,6 +32,11 @@ typedef struct wiring wiring_t;
 struct wstorage;
 typedef struct wstorage wstorage_t;
 
+/* Provide information about a single lock: methods for locking, unlocking,
+ * and asserting that the lock is held.  `arg` is passed in each method's
+ * second argument.  It points to data for the lock---e.g., a
+ * `pthread_mutex_t`.
+ */
 typedef struct wiring_lock_bundle {
     void (*lock)(wiring_t *, void *);
     void (*unlock)(wiring_t *, void *);
@@ -162,6 +167,9 @@ void wiring_assert_locked_impl(wiring_t *, const char *, int);
 void wiring_ref_init(wiring_t *, wiring_ref_t *,
     void (*reclaim)(wiring_ref_t *));
 
+/* Assert that the wiring lock is held, if a lock was established by
+ * `wiring_create`/`wiring_init`.  Otherwise, do nothing.
+ */
 #define wiring_assert_locked(wiring)                            \
 do {                                                            \
     wiring_t *wal_wiring = (wiring);                            \
@@ -170,15 +178,26 @@ do {                                                            \
     wiring_assert_locked_impl(wal_wiring, __FILE__, __LINE__);  \
 } while (0)
 
+/* Reserved value for the associated-data pointer of an unopened or
+ * already-closed wire.
+ */
 extern void * const wire_data_nil;
 
+/* Return true iff the slot number is valid. */
 static inline bool
 wire_is_valid(wire_id_t wid)
 {
     return wid.id != sender_id_nil;
 }
 
-/* Callers are responsible for serializing wiring_ref_get() and
+/* Acquire a reference to the current wiring condition and store it at
+ * `ref`.  The reference can be released with a call to `wiring_ref_get`
+ * with the same `ref`.
+ *
+ * Calls to `wiring_ref_get` and `wiring_ref_put` form matching pairs.
+ * Pairs should not nest.
+ *
+ * Callers are responsible for serializing wiring_ref_get() and
  * wiring_ref_put() calls affecting the same `ref`.
  */
 static inline void
@@ -204,6 +223,16 @@ wiring_ref_get(wiring_t *wiring, wiring_ref_t *ref)
                               memory_order_relaxed);
 }
 
+/* Release the reference at `ref` to the wiring condition that was
+ * obtained by the previous call to `wiring_ref_get` with the same
+ * `ref`.
+ *
+ * Calls to `wiring_ref_get` and `wiring_ref_put` form matching pairs.
+ * Pairs should not nest.
+ *
+ * Callers are responsible for serializing `wiring_ref_get` and
+ * `wiring_ref_put` calls affecting the same `ref`.
+ */
 static inline void
 wiring_ref_put(wiring_t wiring_unused *wiring, wiring_ref_t *ref)
 {
@@ -227,6 +256,14 @@ wiring_ref_put(wiring_t wiring_unused *wiring, wiring_ref_t *ref)
                               memory_order_relaxed);
 }
 
+/* Mark the reference `ref` as ready for destruction.  Wiring may still
+ * holds references to `ref`.  When wiring has finished with `ref`, it
+ * will call the `reclaim` routine that was registered with `ref` by
+ * `wiring_ref_init`.  The call to `reclaim` ordinarily will come
+ * an arbitrary amount of time after `wiring_ref_free` has returned,
+ * but before `wiring_destroy(wiring)` or `wiring_teardown(wiring)`
+ * returns.
+ */
 static inline void
 wiring_ref_free(wiring_t *wiring, wiring_ref_t *ref)
 {
