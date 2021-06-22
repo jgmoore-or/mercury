@@ -234,7 +234,7 @@ wiring_ref_get(wiring_t *wiring, wiring_ref_t *ref)
  * `wiring_ref_put` calls affecting the same `ref`.
  */
 static inline void
-wiring_ref_put(wiring_t wiring_unused *wiring, wiring_ref_t *ref)
+wiring_ref_put(wiring_t *wiring, wiring_ref_t *ref)
 {
     wiring_garbage_schedule_t *sched = &wiring->garbage_sched;
     const uint64_t last = atomic_load_explicit(&sched->epoch.last,
