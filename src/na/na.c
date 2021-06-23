@@ -125,6 +125,11 @@ static const struct na_class_ops *const na_class_table[] = {
 static const char *const na_return_name[] = {NA_RETURN_VALUES};
 #undef X
 
+/* Callback type string table */
+#define X(a) #a,
+static const char *const na_cb_type_name[] = {NA_CB_TYPES};
+#undef X
+
 /* NA_LOG_DEBUG_LESIZE: default number of debug log entries. */
 #define NA_LOG_DEBUG_LESIZE (256)
 
@@ -1454,6 +1459,13 @@ const char *
 NA_Error_to_string(na_return_t errnum)
 {
     return na_return_name[errnum];
+}
+
+/*---------------------------------------------------------------------------*/
+const char *
+na_cb_type_to_string(na_cb_type_t cb_type)
+{
+    return na_cb_type_name[cb_type];
 }
 
 /*---------------------------------------------------------------------------*/
