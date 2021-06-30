@@ -935,7 +935,7 @@ na_ucx_initialize(na_class_t *nacl, const struct na_info *na_info,
     /* Set hostname (use default interface name if no hostname was passed) */
     if (na_info->host_name) {
         char *host_name = NULL, *ifa_name = NULL;
-        unsigned int port;
+        unsigned int port = 0;
 
         host_name = strdup(na_info->host_name);
         NA_CHECK_SUBSYS_ERROR(cls, host_name == NULL, cleanup, ret, NA_NOMEM,
