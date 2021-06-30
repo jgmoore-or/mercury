@@ -75,7 +75,7 @@ static const wire_state_t *start_life(wiring_t *, wire_t *,
     const wireup_msg_t *);
 
 static void wiring_timeout_remove(wstorage_t *, wire_t *, int);
-static void wiring_timeout_put(wstorage_t *, wire_t *, int, uint64_t);
+static bool wiring_timeout_put(wstorage_t *, wire_t *, int, uint64_t);
 static wire_t *wiring_timeout_peek(wstorage_t *, int);
 static wire_t *wiring_timeout_get(wstorage_t *, int);
 
@@ -205,14 +205,15 @@ wiring_timeout_remove(wstorage_t *storage, wire_t *w, int which)
     link->next = link->prev = id;
 }
 
-static void
+static bool
 wiring_timeout_put(wstorage_t *storage, wire_t *w, int which, uint64_t when)
 {
     sender_id_t id = wire_index(storage, w);
     timeout_link_t *link = &w->tlink[which];
     timeout_head_t *head = &storage->thead[which];
+    bool newhead = false;
 
-    hlog_fast(timeout, "%s: wire %p %s %" PRId64,
+    hlog_fast(timeout, "%s: wire %p %s %" PRIu64,
         __func__, (void *)w, timo_string(which), when - getnanos());
 
     link->due = when;
@@ -222,18 +223,20 @@ wiring_timeout_put(wstorage_t *storage, wire_t *w, int which, uint64_t when)
     if (head->last == sender_id_nil) {
         assert(head->first == sender_id_nil);
         head->first = id;
+        newhead = true;
     } else {
         timeout_link_t *lastlink = &storage->wire[head->last].tlink[which];
         assert(lastlink->due <= when);
         lastlink->next = id;
     }
     head->last = id;
+    return newhead;
 }
 
-static inline void
+static inline bool
 wiring_expiration_put(wstorage_t *storage, wire_t *w, uint64_t when)
 {
-    wiring_timeout_put(storage, w, timo_expire, when);
+    return wiring_timeout_put(storage, w, timo_expire, when);
 }
 
 static inline wire_t *
@@ -254,10 +257,10 @@ wiring_expiration_remove(wstorage_t *storage, wire_t *w)
     wiring_timeout_remove(storage, w, timo_expire);
 }
 
-static inline void
+static inline bool
 wiring_wakeup_put(wstorage_t *storage, wire_t *w, uint64_t wakeup)
 {
-    wiring_timeout_put(storage, w, timo_wakeup, wakeup);
+    return wiring_timeout_put(storage, w, timo_wakeup, wakeup);
 }
 
 static inline wire_t *
@@ -524,9 +527,12 @@ start_life(wiring_t *wiring, wire_t *w, const wireup_msg_t *msg)
     w->msg = NULL;
     w->msglen = 0;
     wiring_expiration_remove(st, w);
-    wiring_expiration_put(st, w, gettimeout());
     wiring_wakeup_remove(st, w);
-    wiring_wakeup_put(st, w, getnanos() + keepalive_interval);
+    if (wiring_expiration_put(st, w, gettimeout()) |
+        wiring_wakeup_put(st, w, getnanos() + keepalive_interval)) {
+        hlog_fast(countdown, "%s: signaled change of timeouts", __func__);
+        hg_thread_cond_signal(&wiring->cv);
+    }
 
     return &state[WIRE_S_LIVE];
 }
@@ -570,7 +576,10 @@ continue_life(wiring_t *wiring, wire_t *w, const wireup_msg_t *msg)
     }
 
     wiring_expiration_remove(st, w);
-    wiring_expiration_put(st, w, gettimeout());
+    if (wiring_expiration_put(st, w, gettimeout())) {
+        hlog_fast(countdown, "%s: signaled change of timeouts", __func__);
+        hg_thread_cond_signal(&wiring->cv);
+    }
 
     return &state[WIRE_S_LIVE];
 }
@@ -627,7 +636,10 @@ send_keepalive(wiring_t *wiring, wire_t *w)
         wiring_outst_request_put(wiring, tx_params.request);
     }
 
-    wiring_wakeup_put(st, w, getnanos() + keepalive_interval);
+    if (wiring_wakeup_put(st, w, getnanos() + keepalive_interval)) {
+        hlog_fast(countdown, "%s: signaled change of timeouts", __func__);
+        hg_thread_cond_signal(&wiring->cv);
+    }
 
     return w->state;
 }
@@ -685,7 +697,10 @@ retry(wiring_t *wiring, wire_t *w)
         return &state[WIRE_S_CLOSING];
     }
 
-    wiring_wakeup_put(st, w, getnanos() + retry_interval);
+    if (wiring_wakeup_put(st, w, getnanos() + retry_interval)) {
+        hlog_fast(countdown, "%s: signaled change of timeouts", __func__);
+        hg_thread_cond_signal(&wiring->cv);
+    }
 
     return &state[WIRE_S_INITIAL];
 }
@@ -733,6 +748,16 @@ wiring_teardown(wiring_t *wiring, bool orderly)
     size_t i;
 
     wiring_assert_locked(wiring);
+
+    if (wiring->phase == phase_running) {
+        wiring->phase = phase_stopping;
+        hlog_fast(countdown, "%s: signaled teardown", __func__);
+        hg_thread_cond_signal(&wiring->cv);
+        while (wiring->phase != phase_stopped)
+            hg_thread_cond_wait(&wiring->cv, &wiring->mtx);
+        hg_thread_join(wiring->thread);
+    }
+
     st = wiring->storage;
     if (wiring->rxpool != NULL)
         rxpool_destroy(wiring->rxpool);
@@ -964,6 +989,64 @@ wiring_requests_check_status(wiring_t *wiring)
     return false;
 }
 
+bool
+wiring_worker_arm(wiring_t *wiring)
+{
+    atomic_store_explicit(&wiring->armed, true, memory_order_relaxed);
+    return true;
+}
+
+static HG_THREAD_RETURN_TYPE
+wiring_thread(void *arg)
+{
+    wiring_t *wiring = arg;
+
+    wiring_lock(wiring);
+
+    while (wiring->phase == phase_running) {
+        wstorage_t *st = wiring->storage;
+        wire_t *w;
+        uint64_t due = UINT64_MAX, now = getnanos();
+        unsigned int timeout;
+        int which;
+
+        for (which = 0; which < timo_nlinks; which++) {
+            if ((w = wiring_timeout_peek(st, which)) == NULL)
+                continue;
+            if (w->tlink[which].due < due)
+                due = w->tlink[which].due;
+        }
+
+        if (due <= now) {
+            atomic_store_explicit(&wiring->ready_to_progress, true,
+                memory_order_relaxed);
+            if (atomic_load_explicit(&wiring->armed, memory_order_relaxed))
+                ucp_worker_signal(wiring->worker);
+
+            hlog_fast(countdown, "%s: waiting forever for signal", __func__);
+
+            (void)hg_thread_cond_wait(&wiring->cv, &wiring->mtx);
+            continue;
+        }
+
+        timeout = (unsigned int)MIN(UINT_MAX, (due - now) / 1000000);
+
+        hlog_fast(countdown, "%s: waiting for signal up to %u ms (<= %"
+            PRIu64 "ns", __func__, timeout, due - now);
+
+        (void)hg_thread_cond_timedwait(&wiring->cv, &wiring->mtx, timeout);
+
+        hlog_fast(countdown, "%s: woke", __func__);
+    }
+
+    wiring->phase = phase_stopped;
+    hg_thread_cond_signal(&wiring->cv);
+
+    wiring_unlock(wiring);
+
+    return (hg_thread_ret_t)0;
+}
+
 /* Initialize `wiring` both to answer and to originate wiring requests
  * using `worker`.  Reserve `request_sizes` bytes for UCP-private
  * members of the `ucp_request_t`s used for wireup.  Call `accept_cb`,
@@ -1021,6 +1104,27 @@ wiring_init(wiring_t *wiring, ucp_worker_h worker, size_t request_size,
         st->thead[which].first = st->thead[which].last = sender_id_nil;
 
     wiring_lock(wiring);
+
+    if (hg_thread_cond_init(&wiring->cv) != HG_UTIL_SUCCESS) {
+        wiring_teardown(wiring, true);
+        wiring_unlock(wiring);
+        return false;
+    }
+
+    wiring->phase = phase_stopped;
+    wiring->ready_to_progress = true;
+
+#if 1
+    if (hg_thread_create(&wiring->thread, wiring_thread, wiring) !=
+        HG_UTIL_SUCCESS) {
+        hg_thread_cond_destroy(&wiring->cv);
+        wiring->phase = phase_stopped;
+        wiring_teardown(wiring, true);
+        wiring_unlock(wiring);
+        return false;
+    }
+    wiring->phase = phase_running;
+#endif
 
     wiring->rxpool = rxpool_create(worker, next_buflen, request_size,
         TAG_CHNL_WIREUP, TAG_CHNL_MASK, 32);
@@ -1236,8 +1340,11 @@ wireup_respond(wiring_t *wiring, sender_id_t rid,
     }
     *w = (wire_t){.ep = ep, .id = rid, .state = &state[WIRE_S_LIVE]};
 
-    wiring_expiration_put(st, w, gettimeout());
-    wiring_wakeup_put(st, w, getnanos() + keepalive_interval);
+    if (wiring_expiration_put(st, w, gettimeout()) |
+        wiring_wakeup_put(st, w, getnanos() + keepalive_interval)) {
+        hlog_fast(countdown, "%s: signaled change of timeouts", __func__);
+        hg_thread_cond_signal(&wiring->cv);
+    }
 
     tx_params = (ucp_request_param_t){
       .op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK
@@ -1445,8 +1552,11 @@ wireup_start(wiring_t * const wiring, ucp_address_t *laddr, size_t laddrlen,
         .state = &state[WIRE_S_INITIAL], .msg = msg, .msglen = msglen,
         .cb = cb, .cb_arg = cb_arg};
 
-    wiring_expiration_put(st, w, gettimeout());
-    wiring_wakeup_put(st, w, getnanos() + retry_interval);
+    if (wiring_expiration_put(st, w, gettimeout()) |
+        wiring_wakeup_put(st, w, getnanos() + retry_interval)) {
+        hlog_fast(countdown, "%s: signaled change of timeouts", __func__);
+        hg_thread_cond_signal(&wiring->cv);
+    }
 
     if (!wireup_send(wiring, w)) {
         w->state = &state[WIRE_S_CLOSING];

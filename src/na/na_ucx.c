@@ -316,10 +316,8 @@ static na_return_t na_ucx_put(na_class_t *, na_context_t *, na_cb_t, void *,
 static na_return_t na_ucx_get(na_class_t *, na_context_t *, na_cb_t, void *,
     na_mem_handle_t, na_offset_t, na_mem_handle_t, na_offset_t,
     na_size_t, na_addr_t, na_uint8_t, na_op_id_t *);
-#if 0
 static NA_INLINE int na_ucx_poll_get_fd(na_class_t *, na_context_t *);
 static NA_INLINE na_bool_t na_ucx_poll_try_wait(na_class_t *, na_context_t *);
-#endif
 static na_return_t na_ucx_progress(na_class_t *, na_context_t *, unsigned int);
 static na_return_t na_ucx_cancel(na_class_t *, na_context_t *, na_op_id_t *);
 
@@ -379,13 +377,8 @@ const struct na_class_ops NA_PLUGIN_OPS(ucx) = {
     na_ucx_mem_handle_deserialize,         /* mem_handle_deserialize */
     na_ucx_put,                            /* put */
     na_ucx_get,                            /* get */
-#if 0
     na_ucx_poll_get_fd,                    /* poll_get_fd */
     na_ucx_poll_try_wait,                  /* poll_try_wait */
-#else
-    NULL,                                  /* poll_get_fd */
-    NULL,                                  /* poll_try_wait */
-#endif
     na_ucx_progress,                       /* progress */
     na_ucx_cancel                          /* cancel */
 };
@@ -849,8 +842,8 @@ na_ucx_initialize(na_class_t *nacl, const struct na_info *na_info,
 #endif
     ucp_params_t global_params = {
       .field_mask = UCP_PARAM_FIELD_FEATURES | UCP_PARAM_FIELD_REQUEST_SIZE
-    , .features = UCP_FEATURE_TAG | UCP_FEATURE_RMA
-    , .request_size = sizeof(rxdesc_t)
+    , .features = UCP_FEATURE_TAG | UCP_FEATURE_RMA | UCP_FEATURE_WAKEUP
+    , .request_size = sizeof(rxdesc_t)  /* XXX wireup API leakage here */
     };
     ucp_context_attr_t uctx_attrs = {
         .field_mask = UCP_ATTR_FIELD_REQUEST_SIZE | UCP_ATTR_FIELD_THREAD_MODE
@@ -2480,19 +2473,24 @@ na_ucx_get(na_class_t NA_UNUSED *nacl, na_context_t *ctx, na_cb_t callback,
         remote_mh, remote_offset, length, remote_addr, remote_id, op_id, false);
 }
 
-#if 0
 static NA_INLINE int
-na_ucx_poll_get_fd(na_class_t *nacl, na_context_t *ctx)
+na_ucx_poll_get_fd(na_class_t NA_UNUSED *nacl, na_context_t *ctx)
 {
-    return NA_PROTOCOL_ERROR;
+    na_ucx_context_t *nuctx = ctx->plugin_context;
+    int fd;
+
+    return (ucp_worker_get_efd(nuctx->worker, &fd) == UCS_OK) ? fd : -1;
 }
 
 static NA_INLINE na_bool_t
-na_ucx_poll_try_wait(na_class_t *nacl, na_context_t *ctx)
+na_ucx_poll_try_wait(na_class_t NA_UNUSED *nacl, na_context_t *ctx)
 {
-    return NA_PROTOCOL_ERROR;
+    na_ucx_context_t *nuctx = ctx->plugin_context;
+
+    return na_ucx_progress_once(nuctx) == NA_AGAIN &&
+           ucp_worker_arm(nuctx->worker) == UCS_OK &&
+           wiring_worker_arm(&nuctx->wiring);
 }
-#endif
 
 static NA_INLINE na_size_t
 na_ucx_msg_get_header_size(const na_class_t NA_UNUSED *cl)
