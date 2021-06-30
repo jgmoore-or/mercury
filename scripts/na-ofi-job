@@ -1,8 +1,0 @@
-#!/bin/bash
-# LSF directives
-#BSUB -q debug
-#BSUB -P CSC444
-#BSUB -W 0:10
-#BSUB -nnodes 2
-
-${dir}/${personality}-startall
