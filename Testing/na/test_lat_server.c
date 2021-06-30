@@ -236,11 +236,10 @@ na_test_loop_latency(struct na_test_lat_info *na_test_lat_info)
         goto done;
     }
 
-    while (na_test_source_recv_arg.tag != NA_TEST_TAG_DONE) {
+    do {
         hg_request_wait(send_request, NA_MAX_IDLE_TIME, NULL);
         hg_request_reset(send_request);
-    }
-    hg_request_wait(send_request, NA_MAX_IDLE_TIME, NULL);
+    } while (na_test_source_recv_arg.tag != NA_TEST_TAG_DONE);
 
 done:
     /* Clean up resources */
