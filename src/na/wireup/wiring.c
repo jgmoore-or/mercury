@@ -1114,7 +1114,6 @@ wiring_init(wiring_t *wiring, ucp_worker_h worker, size_t request_size,
     wiring->phase = phase_stopped;
     wiring->ready_to_progress = true;
 
-#if 1
     if (hg_thread_create(&wiring->thread, wiring_thread, wiring) !=
         HG_UTIL_SUCCESS) {
         hg_thread_cond_destroy(&wiring->cv);
@@ -1124,7 +1123,6 @@ wiring_init(wiring_t *wiring, ucp_worker_h worker, size_t request_size,
         return false;
     }
     wiring->phase = phase_running;
-#endif
 
     wiring->rxpool = rxpool_create(worker, next_buflen, request_size,
         TAG_CHNL_WIREUP, TAG_CHNL_MASK, 32);
@@ -1715,14 +1713,15 @@ wireup_once(wiring_t *wiring)
         return 0;
 
     wiring_lock(wiring);
-#if 1
+
     atomic_store_explicit(&wiring->ready_to_progress, false,
         memory_order_relaxed);
-#endif
+
     while ((ret = wireup_once_locked(wiring, rdesc)) > 0) {
         progress = true;
         rdesc = rxpool_next(rxpool);
     }
+
     wiring_unlock(wiring);
 
     if (ret < 0)

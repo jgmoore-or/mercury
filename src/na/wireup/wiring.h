@@ -62,7 +62,7 @@ typedef bool (*wire_event_cb_t)(wire_event_info_t, void *);
 typedef struct wire_accept_info {
     const ucp_address_t *addr;
     size_t addrlen;
-    wire_id_t wire_id;
+    wire_id_t wire_id;  /* TBD mention which ID is which here */
     sender_id_t sender_id;
     ucp_ep_h ep;
 } wire_accept_info_t;
