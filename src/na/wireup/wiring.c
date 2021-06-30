@@ -1436,9 +1436,8 @@ wireup_send(wiring_t *wiring, wire_t *w)
 hg_thread_mutex_t *
 wiring_lock(wiring_t *wiring)
 {
-    const int NA_DEBUG_USED rc = hg_thread_mutex_lock(&wiring->mtx);
+    hg_thread_mutex_lock(&wiring->mtx);
 
-    assert(rc == HG_UTIL_SUCCESS);
     return &wiring->mtx;
 }
 
@@ -1448,9 +1447,7 @@ wiring_lock(wiring_t *wiring)
 void
 wiring_unlock(wiring_t *wiring)
 {
-    const int NA_DEBUG_USED rc = hg_thread_mutex_unlock(&wiring->mtx);
-
-    assert(rc == HG_UTIL_SUCCESS);
+    hg_thread_mutex_unlock(&wiring->mtx);
 }
 
 #if 0
