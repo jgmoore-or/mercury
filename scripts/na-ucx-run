@@ -40,57 +40,36 @@ perfcmd()
 {
 	which=$1
 	perfpfx="perf record -F 999 -e $event -g"
-	echo "$perfpfx -o ${which}.perf --"
+	if [ ${mpi:-no} = no ]; then
+		echo "$perfpfx -o ${which}.perf --"
+	fi
 }
 
-pfxcmd="timeout -s ABRT 120s"
 
 hg_build_dir=$HOME/na-ucx/mercury/build
 
 cd $MEMBERWORK/csc444
 
+if [ ${test##hg_} != ${test} ]; then
+	opt_x="-x 16"
+else
+	opt_x=
+fi
+
+if [ ${mpi:-no} = yes ]; then
+	opt_s=-s
+	pfxcmd=
+else
+	opt_s=
+	pfxcmd="timeout -s ABRT 120s"
+fi
+
 uname -a
 echo parameters UCX_NET_DEVICES=${UCX_NET_DEVICES} UCX_TLS=${UCX_TLS}
 echo perfcmd $(perfcmd sample)
-
-tests="na_test_lat_client"
-tests="${tests} hg_test_rpc_lat hg_test_read_bw hg_test_write_bw"
+echo nnodes $nnodes mpi ${mpi:-no}
 
 case ${PMIX_RANK:-other} in
-0)
-	for test in $tests; do
-		if [ ${test##na_} != ${test} ]; then
-			server=$hg_build_dir/bin/na_test_lat_server
-		else
-			server=$hg_build_dir/bin/hg_test_server
-		fi
-		echo "server node: starting $server for $test" 1>&2
-		$pfxcmd $(perfcmd ${test}-sv) $server -V -c $comm -p verbs -b \
-		    -H mlx5_0 2>&1 | sed -u 's,^,S ,'
-		echo "server node: removing port.cfg" 1>&2
-		rm -f port.cfg
-		echo "server node: creating finished-$test" 1>&2
-		touch finished-$test
-	done
-	echo "server node: tests complete" 1>&2
-	;;
-1)
-	for test in $tests; do
-		echo "client node: awaiting port.cfg for $test" 1>&2
-		while [ ! -e port.cfg ]; do
-			sleep 1
-		done
-		client=$hg_build_dir/bin/$test
-		echo "client node: starting $client for $test" 1>&2
-		$pfxcmd $(perfcmd ${test}-cl) $client -V -c $comm -p verbs -b \
-		    -H mlx5_0 -l 1000 2>&1 | sed -u 's,^,C ,'
-		echo "client node: awaiting finished-$test" 1>&2
-		while ! rm finished-$test 2> /dev/null; do
-			sleep 1
-		done
-	done
-	echo "client node: tests complete" 1>&2
-	;;
 other)
 	if [ ${PMIX_RANK:-none} = "none" ]
 	then
@@ -98,5 +77,30 @@ other)
 	else
 		echo "Unexpected rank (PMIX_RANK), ${PMIX_RANK}." 1>&2
 	fi
+	;;
+0)
+	if [ ${test##na_} != ${test} ]; then
+		server=$hg_build_dir/bin/na_test_lat_server
+	else
+		server=$hg_build_dir/bin/hg_test_server
+	fi
+	echo "server node: starting $server for $test" 1>&2
+	$pfxcmd $(perfcmd ${test}-sv) $server -V -c $comm -p verbs -b \
+	    ${opt_s} ${opt_x} -H mlx5_0 2>&1 | sed -u 's,^,S ,'
+	echo "server rank $PMIX_RANK: ${test} complete" 1>&2
+	;;
+*)
+	echo "rank $PMIX_RANK (client)"
+	if [ ${mpi:-no} = no ]; then
+		echo "client node: awaiting port.cfg for $test" 1>&2
+		while [ ! -e port.cfg ]; do
+			sleep 1
+		done
+	fi
+	client=$hg_build_dir/bin/$test
+	echo "client node: starting $client for $test" 1>&2
+	$pfxcmd $(perfcmd ${test}-cl) $client -V -c $comm -p verbs -b \
+	    ${opt_s} ${opt_x} -H mlx5_0 -l 1000 2>&1 | sed -u 's,^,C ,'
+	echo "client rank $PMIX_RANK: ${test} complete" 1>&2
 	;;
 esac
