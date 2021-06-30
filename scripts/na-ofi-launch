@@ -1,7 +1,35 @@
 #!/bin/sh
+set -e
+set -u
 
 export dir=$(pwd)/$(dirname $0)
 prog=$(basename $0)
 export personality=${prog%%-launch}
 
-bsub ${dir}/${personality}-job
+if [ $# -gt 0 ]; then
+	nclients=$1
+	nnodes=$(($nclients + 1))
+else
+	nnodes=2
+fi
+
+export nnodes
+
+tmpdir=$(mktemp -d $HOME/${prog}.XXXXXX)
+
+#BSUB -csm y
+#BSUB -n ${nnodes}
+#BSUB -R "cu[type=enclosure:maxcus=1]"
+
+cat > ${tmpdir}/${personality}-job <<EOF
+#!/bin/bash
+# LSF directives
+#BSUB -P CSC444
+#BSUB -W 0:10
+#BSUB -q debug
+#BSUB -nnodes ${nnodes}
+
+${dir}/${personality}-startall
+EOF
+
+bsub ${tmpdir}/${personality}-job
