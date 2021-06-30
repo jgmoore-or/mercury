@@ -633,8 +633,7 @@ na_ucx_context_teardown(na_ucx_context_t *nctx, na_class_t *nacl)
 {
     na_ucx_addr_t *self;
 
-    if ((self = nctx->self) == NULL)
-        return;
+    self = nctx->self;
 
     nctx->self = NULL;
     (void)na_ucx_addr_free(nacl, self);
