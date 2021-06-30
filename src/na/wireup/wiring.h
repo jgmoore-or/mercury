@@ -16,6 +16,10 @@
 
 #include <ucp/api/ucp.h>
 
+#include "../util/mercury_thread.h"
+#include "../util/mercury_thread_mutex.h"
+#include "../util/mercury_thread_condition.h"
+
 #include "wiring_compat.h"
 
 typedef uint32_t sender_id_t;
@@ -31,18 +35,6 @@ typedef struct wiring wiring_t;
 
 struct wstorage;
 typedef struct wstorage wstorage_t;
-
-/* Provide information about a single lock: methods for locking, unlocking,
- * and asserting that the lock is held.  `arg` is passed in each method's
- * second argument.  It points to data for the lock---e.g., a
- * `pthread_mutex_t`.
- */
-typedef struct wiring_lock_bundle {
-    void (*lock)(wiring_t *, void *);
-    void (*unlock)(wiring_t *, void *);
-    bool (*assert_locked)(wiring_t *, void *);
-    void *arg;
-} wiring_lock_bundle_t;
 
 typedef struct wire_id {
     sender_id_t wiring_atomic id;
@@ -126,8 +118,14 @@ typedef struct wiring_garbage_schedule {
     wiring_garbage_bin_t bin[128];
 } wiring_garbage_schedule_t;
 
+typedef enum {
+  phase_stopped = 0
+, phase_running
+, phase_stopping
+} wiring_phase_t;
+
 struct wiring {
-    wiring_lock_bundle_t lkb;
+    hg_thread_mutex_t mtx;
     wire_accept_cb_t accept_cb;
     void *accept_cb_arg;
     rxpool_t *rxpool;
@@ -142,14 +140,18 @@ struct wiring {
     wiring_request_t **req_outst_tailp;  // ucp_request_ts outstanding
     wiring_request_t *req_free_head;     // ucp_request_t free list
     wiring_garbage_schedule_t garbage_sched;
+    hg_thread_t thread;
+    hg_thread_cond_t cv;
+    volatile bool wiring_atomic ready_to_progress;
+    volatile wiring_phase_t wiring_atomic phase;
+    volatile bool wiring_atomic armed;
 };
 
 #define wire_id_nil (wire_id_t){.id = sender_id_nil}
 
-wiring_t *wiring_create(ucp_worker_h, size_t, const wiring_lock_bundle_t *,
-    wire_accept_cb_t, void *);
-bool wiring_init(wiring_t *, ucp_worker_h, size_t,
-    const wiring_lock_bundle_t *, wire_accept_cb_t, void *);
+wiring_t *wiring_create(ucp_worker_h, size_t, wire_accept_cb_t, void *);
+bool wiring_worker_arm(wiring_t *);
+bool wiring_init(wiring_t *, ucp_worker_h, size_t, wire_accept_cb_t, void *);
 int wireup_once(wiring_t *);
 void wiring_destroy(wiring_t *, bool);
 void wiring_teardown(wiring_t *, bool);
@@ -160,7 +162,7 @@ void wireup_app_tag(wiring_t *, uint64_t *, uint64_t *);
 const char *wire_event_string(wire_event_t);
 void *wire_get_data(wiring_t *, wire_id_t);
 
-void wiring_lock(wiring_t *);
+hg_thread_mutex_t *wiring_lock(wiring_t *);
 void wiring_unlock(wiring_t *);
 void wiring_assert_locked_impl(wiring_t *, const char *, int);
 
@@ -173,8 +175,6 @@ void wiring_ref_init(wiring_t *, wiring_ref_t *,
 #define wiring_assert_locked(wiring)                            \
 do {                                                            \
     wiring_t *wal_wiring = (wiring);                            \
-    if (wal_wiring->lkb.assert_locked == NULL)                  \
-        break;                                                  \
     wiring_assert_locked_impl(wal_wiring, __FILE__, __LINE__);  \
 } while (0)
 

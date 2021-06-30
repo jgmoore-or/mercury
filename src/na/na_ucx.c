@@ -242,8 +242,6 @@ struct na_ucx_context {
 };
 
 struct na_ucx_class {
-    wiring_lock_bundle_t lkb;
-    hg_thread_mutex_t wiring_api_lock;
     ucp_context_h uctx;
     size_t request_size;        /* Size in bytes of the UCX transaction
                                  * identifier ("request").
@@ -574,39 +572,6 @@ na_ucx_addr_equal(hg_hash_table_key_t key1, hg_hash_table_key_t key2)
     return memcmp(addr1->addr, addr2->addr, addr1->addrlen) == 0;
 }
 
-#if 0
-static void
-na_ucx_wiring_lock(wiring_t NA_UNUSED *wiring, void *arg)
-{
-    hg_thread_mutex_t *mtx = arg;
-    const int NA_DEBUG_USED rc = hg_thread_mutex_lock(mtx);
-
-    assert(rc == HG_UTIL_SUCCESS);
-}
-
-static void
-na_ucx_wiring_unlock(wiring_t NA_UNUSED *wiring, void *arg)
-{
-    hg_thread_mutex_t *mtx = arg;
-    const int NA_DEBUG_USED rc = hg_thread_mutex_unlock(mtx);
-
-    assert(rc == HG_UTIL_SUCCESS);
-}
-
-static bool
-na_ucx_wiring_assert_locked(wiring_t NA_UNUSED *wiring, void *arg)
-{
-    hg_thread_mutex_t *mtx = arg;
-    const int rc = hg_thread_mutex_try_lock(mtx);
-
-    if (rc == HG_UTIL_SUCCESS) {
-        (void)hg_thread_mutex_unlock(mtx);
-        return false;
-    }
-    return true;
-}
-#endif
-
 static void *
 wire_accept_callback(wire_accept_info_t info, void *arg,
     wire_event_cb_t *cbp, void **argp)
@@ -778,7 +743,7 @@ na_ucx_context_init(
         goto cleanup_self;
 
     if (!wiring_init(&nctx->wiring, nctx->worker, nucl->request_size,
-            &nucl->lkb, wire_accept_callback, nctx))
+                     wire_accept_callback, nctx))
         goto cleanup_tbl;
 
     wireup_app_tag(&nctx->wiring, &nctx->app.tag, &nctx->app.tagmask);
@@ -1038,15 +1003,6 @@ na_ucx_initialize(na_class_t *nacl, const struct na_info *na_info,
         (uctx_attrs.field_mask & UCP_ATTR_FIELD_THREAD_MODE) == 0, cleanup,
         ret, NA_PROTOCOL_ERROR,
         "context attributes contain no thread mode");
-
-    nucl->wiring_api_lock = (hg_thread_mutex_t)HG_THREAD_MUTEX_INITIALIZER;
-
-    nucl->lkb = (wiring_lock_bundle_t){
-      .arg = &nucl->wiring_api_lock
-    , .lock = NULL
-    , .unlock = NULL
-    , .assert_locked = NULL
-    };
 
     nucl->request_size = uctx_attrs.request_size;
 
@@ -1624,9 +1580,34 @@ send_callback(void *request, ucs_status_t status, void NA_UNUSED *user_data)
     na_cb_completion_add(op->ctx.na, &op->completion_data);
 }
 
+/* Try to make progress on `context`.  Return NA_SUCCESS if progress was
+ * made, NA_AGAIN if no progress was made, NA_PROTOCOL_ERROR on error.
+ */
 static na_return_t
-na_ucx_progress(na_class_t NA_UNUSED *nacl,
-    na_context_t *context, unsigned int timeout_ms)
+na_ucx_progress_once(na_ucx_context_t *nuctx)
+{
+    int ret;
+    bool progress = false;
+
+    if (ucp_worker_progress(nuctx->worker) != 0) {
+        hlog_fast(progress, "%s: UCP made progress", __func__);
+        progress = true;
+    }
+
+    if ((ret = wireup_once(&nuctx->wiring)) > 0) {
+        hlog_fast(progress, "%s: wireup made progress", __func__);
+        progress = true;
+    } else if (ret < 0) {
+        NA_LOG_ERROR("wireup failed");
+        return NA_PROTOCOL_ERROR;
+    }
+
+    return progress ? NA_SUCCESS : NA_AGAIN;
+}
+
+static na_return_t
+na_ucx_progress(na_class_t NA_UNUSED *nacl, na_context_t *context,
+    unsigned int timeout_ms)
 {
     na_ucx_context_t *nuctx = context->plugin_context;
     hg_time_t deadline, now = hg_time_from_ms(0);
@@ -1639,28 +1620,10 @@ na_ucx_progress(na_class_t NA_UNUSED *nacl,
     deadline = hg_time_add(now, hg_time_from_ms(timeout_ms));
 
     do {
-        int ret;
-        bool progress = false;
+        na_return_t status = na_ucx_progress_once(nuctx);
 
-        if (ucp_worker_progress(nuctx->worker) != 0) {
-            hlog_fast(progress, "%s: UCP made progress", __func__);
-            progress = true;
-        }
-
-        wiring_lock(&nuctx->wiring);
-        while ((ret = wireup_once(&nuctx->wiring)) > 0) {
-            hlog_fast(progress, "%s: wireup made progress", __func__);
-            progress = true;
-        }
-        wiring_unlock(&nuctx->wiring);
-
-        if (ret < 0) {
-            NA_LOG_ERROR("wireup failed");
-            return NA_PROTOCOL_ERROR;
-        }
-
-        if (progress)
-            return NA_SUCCESS;
+        if (status != NA_AGAIN)
+            return status;
 
         if (timeout_ms != 0 && hg_time_get_current_ms(&now) < 0) {
             NA_LOG_ERROR("could not get current time");

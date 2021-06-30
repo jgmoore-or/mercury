@@ -6,6 +6,7 @@
 #include <time.h> /* clock_gettime(2) */
 #include <unistd.h> /* size_t, SIZE_MAX */
 
+#include "../../na/na_plugin.h"
 #include "../../hlog/src/hlog.h"
 #include "rxpool.h"
 #include "tag.h"
@@ -37,6 +38,7 @@ HLOG_OUTLET_SHORT_DEFN(reclaim, wireup);
 HLOG_OUTLET_SHORT_DEFN(timeout_noisy, all);
 HLOG_OUTLET_SHORT_DEFN(interval, timeout_noisy);
 HLOG_OUTLET_SHORT_DEFN(timeout, timeout_noisy);
+HLOG_OUTLET_SHORT_DEFN(countdown, timeout);
 
 static char wire_no_data;
 void * const wire_data_nil = &wire_no_data;
@@ -105,13 +107,6 @@ static wire_state_t state[] = {
                    .wakeup = ignore_wakeup,
                    .receive = reject_msg,
                    .descr = "free"}
-};
-
-static const wiring_lock_bundle_t default_lkb = {
-  .lock = NULL
-, .unlock = NULL
-, .assert_locked = NULL
-, .arg = NULL
 };
 
 static const char *
@@ -971,15 +966,12 @@ wiring_requests_check_status(wiring_t *wiring)
 
 /* Initialize `wiring` both to answer and to originate wiring requests
  * using `worker`.  Reserve `request_sizes` bytes for UCP-private
- * members of the `ucp_request_t`s used for wireup.  Use the custom lock
- * implementation `lkb` or else the default implementation if `lkb` is
- * NULL.  Call `accept_cb`, if it is not NULL, passing `accept_cb_arg`
- * in the second argument, after accepting a wiring request from a
- * remote peer.
+ * members of the `ucp_request_t`s used for wireup.  Call `accept_cb`,
+ * if it is not NULL, passing `accept_cb_arg` in the second argument,
+ * after accepting a wiring request from a remote peer.
  */
 bool
 wiring_init(wiring_t *wiring, ucp_worker_h worker, size_t request_size,
-    const wiring_lock_bundle_t *lkb,
     wire_accept_cb_t accept_cb, void *accept_cb_arg)
 {
     wstorage_t *st;
@@ -988,13 +980,15 @@ wiring_init(wiring_t *wiring, ucp_worker_h worker, size_t request_size,
     sender_id_t i;
     void **assoc;
 
-    wiring->lkb = (lkb != NULL) ? *lkb : default_lkb;
+    hlog_fast(countdown, "%s: countdown initial log", __func__);
+
     wiring->accept_cb = accept_cb;
     wiring->accept_cb_arg = accept_cb_arg;
     wiring->worker = worker;
     wiring->request_size = request_size;
     wiring->req_free_head = wiring->req_outst_head = NULL;
     wiring->req_outst_tailp = &wiring->req_outst_head;
+    wiring->mtx = (hg_thread_mutex_t)HG_THREAD_MUTEX_INITIALIZER;
 
     st = zalloc(sizeof(*st) + sizeof(wire_t) * nwires);
     if (st == NULL)
@@ -1026,15 +1020,20 @@ wiring_init(wiring_t *wiring, ucp_worker_h worker, size_t request_size,
     for (which = 0; which < timo_nlinks; which++)
         st->thead[which].first = st->thead[which].last = sender_id_nil;
 
+    wiring_lock(wiring);
+
     wiring->rxpool = rxpool_create(worker, next_buflen, request_size,
         TAG_CHNL_WIREUP, TAG_CHNL_MASK, 32);
 
     if (wiring->rxpool == NULL) {
         wiring_teardown(wiring, true);
+        wiring_unlock(wiring);
         return false;
     }
 
     wiring_garbage_init(&wiring->garbage_sched);
+
+    wiring_unlock(wiring);
 
     return true;
 }
@@ -1046,7 +1045,6 @@ wiring_init(wiring_t *wiring, ucp_worker_h worker, size_t request_size,
  */
 wiring_t *
 wiring_create(ucp_worker_h worker, size_t request_size,
-    const wiring_lock_bundle_t *lkb,
     wire_accept_cb_t accept_cb, void *accept_cb_arg)
 {
     wiring_t *wiring;
@@ -1054,8 +1052,7 @@ wiring_create(ucp_worker_h worker, size_t request_size,
     if ((wiring = malloc(sizeof(*wiring))) == NULL)
         return NULL;
 
-    if (!wiring_init(wiring, worker, request_size, lkb,
-                     accept_cb, accept_cb_arg)) {
+    if (!wiring_init(wiring, worker, request_size, accept_cb, accept_cb_arg)) {
         free(wiring);
         return NULL;
     }
@@ -1331,12 +1328,13 @@ wireup_send(wiring_t *wiring, wire_t *w)
 /* Acquire the wiring lock if one was established by
  * `wiring_create`/`wiring_init`.  Otherwise, do nothing.
  */
-void
+hg_thread_mutex_t *
 wiring_lock(wiring_t *wiring)
 {
-    if (wiring->lkb.lock == NULL)
-        return;
-    (*wiring->lkb.lock)(wiring, wiring->lkb.arg);
+    const int NA_DEBUG_USED rc = hg_thread_mutex_lock(&wiring->mtx);
+
+    assert(rc == HG_UTIL_SUCCESS);
+    return &wiring->mtx;
 }
 
 /* Release the wiring lock if one was established by
@@ -1345,22 +1343,34 @@ wiring_lock(wiring_t *wiring)
 void
 wiring_unlock(wiring_t *wiring)
 {
-    if (wiring->lkb.unlock == NULL)
-        return;
-    (*wiring->lkb.unlock)(wiring, wiring->lkb.arg);
+    const int NA_DEBUG_USED rc = hg_thread_mutex_unlock(&wiring->mtx);
+
+    assert(rc == HG_UTIL_SUCCESS);
 }
 
+#if 0
 void
-wiring_assert_locked_impl(wiring_t *wiring, const char *filename, int lineno)
+wiring_assert_locked_impl(wiring_t *wiring,
+    const char *filename, int lineno)
 {
-    if (wiring->lkb.assert_locked == NULL)
-        return;
-    if ((*wiring->lkb.assert_locked)(wiring, wiring->lkb.arg))
-        return;
-    fprintf(stderr, "%s.%d: wiring %p is unlocked, aborting.\n",
-        filename, lineno, (void *)wiring);
-    abort();
+    hg_thread_mutex_t *mtx = &wiring->mtx;
+    const int rc = hg_thread_mutex_try_lock(mtx);
+
+    if (rc == HG_UTIL_SUCCESS) {
+        (void)hg_thread_mutex_unlock(mtx);
+        fprintf(stderr, "%s.%d: wiring %p is unlocked, aborting.\n",
+            filename, lineno, (void *)wiring);
+        abort();
+    }
 }
+#else
+void
+wiring_assert_locked_impl(wiring_t NA_UNUSED *wiring,
+    const char NA_UNUSED *filename, int NA_UNUSED lineno)
+{
+    return;
+}
+#endif
 
 /* Initiate wireup: create a wire, configure an endpoint for `raddr`, send
  * a message to the endpoint telling our wire's Sender ID and our address,
@@ -1528,24 +1538,10 @@ wireup_rx_req(wiring_t *wiring, const wireup_msg_t *msg)
         w - &wiring->storage->wire[0], w->id);
 }
 
-/* Poll for and process received wireup messages, update the state of
- * all wires based on the elapsed time and the messages received,
- * send any replies or keepalives that are due, and collect disused
- * resources.
- *
- * If any progress was made, return 1.  If no progress was made, and no
- * error occurred, return 0.  Return -1 on an unrecoverable error.  Note
- * well: after an unrecoverable error occurs, routines called on the
- * `wiring_t` will have undefined results.
- *
- * Note well: the caller must hold the wiring lock.  See `wiring_lock`,
- * `wiring_unlock`, et cetera.
- */
-int
-wireup_once(wiring_t *wiring)
+static int
+wireup_once_locked(wiring_t *wiring, rxdesc_t *rdesc)
 {
     rxpool_t *rxpool = wiring->rxpool;
-    rxdesc_t *rdesc;
     uint64_t now = getnanos();
     bool progress;
 
@@ -1564,7 +1560,7 @@ wireup_once(wiring_t *wiring)
 
     wiring_reclaim(wiring, false, &progress);
 
-    if ((rdesc = rxpool_next(rxpool)) == NULL)
+    if (rdesc == NULL)
         return progress ? 1 : 0;
 
     if (rdesc->status != UCS_OK) {
@@ -1581,6 +1577,48 @@ wireup_once(wiring_t *wiring)
     rxdesc_release(rxpool, rdesc);
 
     return 1;
+}
+
+/* Poll for and process received wireup messages, update the state of
+ * all wires based on the elapsed time and the messages received,
+ * send any replies or keepalives that are due, and collect disused
+ * resources.
+ *
+ * If any progress was made, return 1.  If no progress was made, and no
+ * error occurred, return 0.  Return -1 on an unrecoverable error.  Note
+ * well: after an unrecoverable error occurs, routines called on the
+ * `wiring_t` will have undefined results.
+ *
+ * Note well: the caller must hold the wiring lock.  See `wiring_lock`,
+ * `wiring_unlock`, et cetera.
+ */
+int
+wireup_once(wiring_t *wiring)
+{
+    int ret;
+    bool progress = false;
+    rxpool_t *rxpool = wiring->rxpool;
+    rxdesc_t *rdesc;
+
+    if ((rdesc = rxpool_next(rxpool)) == NULL &&
+        !atomic_load_explicit(&wiring->ready_to_progress, memory_order_relaxed))
+        return 0;
+
+    wiring_lock(wiring);
+#if 1
+    atomic_store_explicit(&wiring->ready_to_progress, false,
+        memory_order_relaxed);
+#endif
+    while ((ret = wireup_once_locked(wiring, rdesc)) > 0) {
+        progress = true;
+        rdesc = rxpool_next(rxpool);
+    }
+    wiring_unlock(wiring);
+
+    if (ret < 0)
+        return ret;
+
+    return progress ? 1 : 0;
 }
 
 /* Store at `maskp` and `atagp` the mask and tag that wireup reserves
