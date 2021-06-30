@@ -323,6 +323,7 @@ static NA_INLINE na_bool_t na_ucx_poll_try_wait(na_class_t *, na_context_t *);
 static na_return_t na_ucx_progress(na_class_t *, na_context_t *, unsigned int);
 static na_return_t na_ucx_cancel(na_class_t *, na_context_t *, na_op_id_t *);
 
+static na_return_t na_ucx_progress_once(na_ucx_context_t *);
 static NA_INLINE na_size_t na_ucx_msg_get_header_size(const na_class_t *);
 static NA_INLINE na_size_t na_ucx_msg_get_max_size(const na_class_t *);
 static NA_INLINE na_tag_t na_ucx_msg_get_max_tag(const na_class_t *);
