@@ -61,7 +61,7 @@ if [ ${mpi:-no} = yes ]; then
 	pfxcmd=
 else
 	opt_s=
-	pfxcmd="timeout -s ABRT 120s"
+	pfxcmd=		# was "timeout -s ABRT 120s"
 fi
 
 uname -a
