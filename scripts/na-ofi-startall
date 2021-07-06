@@ -23,10 +23,15 @@ fi
 tests="${tests} hg_test_rpc_lat hg_test_read_bw hg_test_write_bw"
 
 {
-	for test in $tests; do
-		export test
-		rm -f port.cfg ucx-test-hostname finished-*
-		jsrun -n ${nnodes} -r 1 -l CPU-CPU sh ${dir}/${personality}-run
+	module load job-step-viewer
+
+	for busy in yes no; do
+		for test in $tests; do
+			export busy
+			export test
+			rm -f port.cfg ucx-test-hostname finished-*
+			jsrun -n ${nnodes} -a1 -c42 sh ${dir}/${personality}-run
+		done
 	done
 	echo "tests complete" 1>&2
 } > $outfile 2>&1

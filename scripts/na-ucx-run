@@ -67,7 +67,12 @@ fi
 uname -a
 echo parameters UCX_NET_DEVICES=${UCX_NET_DEVICES} UCX_TLS=${UCX_TLS}
 echo perfcmd $(perfcmd sample)
-echo nnodes $nnodes mpi ${mpi:-no}
+echo nnodes $nnodes mpi ${mpi:-no} busy loop ${busy:-no}
+
+opt_b=
+if [ ${busy:-no} = yes ]; then
+	opt_b=-b
+fi
 
 case ${PMIX_RANK:-other} in
 other)
@@ -85,7 +90,7 @@ other)
 		server=$hg_build_dir/bin/hg_test_server
 	fi
 	echo "server node: starting $server for $test" 1>&2
-	$pfxcmd $(perfcmd ${test}-sv) $server -V -c $comm -p rc -b \
+	$pfxcmd $(perfcmd ${test}-sv) $server -V -c $comm -p rc ${opt_b} \
 	    ${opt_s} ${opt_x} -H mlx5_0 2>&1 | sed -u 's,^,S ,'
 	echo "server rank $PMIX_RANK: ${test} complete" 1>&2
 	;;
@@ -99,7 +104,7 @@ other)
 	fi
 	client=$hg_build_dir/bin/$test
 	echo "client node: starting $client for $test" 1>&2
-	$pfxcmd $(perfcmd ${test}-cl) $client -V -c $comm -p rc -b \
+	$pfxcmd $(perfcmd ${test}-cl) $client -V -c $comm -p rc ${opt_b} \
 	    ${opt_s} ${opt_x} -H mlx5_0 -l 1000 2>&1 | sed -u 's,^,C ,'
 	echo "client rank $PMIX_RANK: ${test} complete" 1>&2
 	;;
