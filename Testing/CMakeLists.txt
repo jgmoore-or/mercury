@@ -57,7 +57,7 @@ if(NA_USE_BMI)
 endif()
 
 if(NA_USE_UCX)
-  set(NA_UCX_TESTING_PROTOCOL "tcp" CACHE STRING "Protocol(s) used for testing (e.g., tcp;ib).")
+  set(NA_UCX_TESTING_PROTOCOL "all" CACHE STRING "Protocol(s) used for testing (e.g., tcp;ib).")
   mark_as_advanced(NA_UCX_TESTING_PROTOCOL)
 endif()
 
