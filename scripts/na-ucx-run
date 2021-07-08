@@ -90,8 +90,8 @@ other)
 		server=$hg_build_dir/bin/hg_test_server
 	fi
 	echo "server node: starting $server for $test" 1>&2
-	$pfxcmd $(perfcmd ${test}-sv) $server -V -c $comm -p rc ${opt_b} \
-	    ${opt_s} ${opt_x} -H mlx5_0 2>&1 | sed -u 's,^,S ,'
+	$pfxcmd $(perfcmd ${test}-sv) $server -V ${opt_s} \
+	    -c $comm -p rc ${opt_b} ${opt_x} -H mlx5_0 2>&1 | sed -u 's,^,S ,'
 	echo "server rank $PMIX_RANK: ${test} complete" 1>&2
 	;;
 *)
@@ -104,8 +104,9 @@ other)
 	fi
 	client=$hg_build_dir/bin/$test
 	echo "client node: starting $client for $test" 1>&2
-	$pfxcmd $(perfcmd ${test}-cl) $client -V -c $comm -p rc ${opt_b} \
-	    ${opt_s} ${opt_x} -H mlx5_0 -l 1000 2>&1 | sed -u 's,^,C ,'
+	$pfxcmd $(perfcmd ${test}-cl) $client -V ${opt_s} \
+	    -c $comm -p rc ${opt_b} ${opt_x} -H mlx5_0 -l 1000 2>&1 | \
+	    sed -u 's,^,C ,'
 	echo "client rank $PMIX_RANK: ${test} complete" 1>&2
 	;;
 esac
