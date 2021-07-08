@@ -13,7 +13,6 @@ outfile=$(next_output_file $personality)
 
 echo output file ${outfile}
 
-
 if [ ${mpi:-no} = no ]; then
 	tests="na_test_lat_client"
 else
@@ -30,7 +29,7 @@ tests="${tests} hg_test_rpc_lat hg_test_read_bw hg_test_write_bw"
 			export busy
 			export test
 			rm -f port.cfg ucx-test-hostname finished-*
-			jsrun -n ${nnodes} -a1 -c42 sh ${dir}/${personality}-run
+			jsrun -n ${nnodes} -a1 -c${cores_per_compute_node} sh ${dir}/${personality}-run
 		done
 	done
 	echo "tests complete" 1>&2

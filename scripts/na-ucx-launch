@@ -17,11 +17,10 @@ export nnodes
 
 tmpdir=$(mktemp -d $HOME/${prog}.XXXXXX)
 
-#BSUB -csm y
-#BSUB -n ${nnodes}
-#BSUB -R "cu[type=enclosure:maxcus=1]"
-
-# TBD replace 85 by 1 + ${nnodes} * 2, 84 by ${nnodes} * 2
+export cores_per_compute_node=42
+batch_slots=1
+compute_slots=$((nnodes * cores_per_compute_node))
+total_slots=$((batch_slots + compute_slots))
 
 cat > ${tmpdir}/${personality}-job <<EOF
 #!/bin/bash
@@ -30,8 +29,8 @@ cat > ${tmpdir}/${personality}-job <<EOF
 #BSUB -W 0:10
 #BSUB -q debug
 #BSUB -csm y
-#BSUB -n 85
-#BSUB -R "1*{select[LN]}+84*{select[((CN)&&(type==any))]span[ptile=42]cu[type=rack:maxcus=1]}"
+#BSUB -n ${total_slots}
+#BSUB -R "1*{select[LN]}+${compute_slots}*{select[((CN)&&(type==any))]span[ptile=${cores_per_compute_node}]cu[type=rack:maxcus=1]}"
 #BSUB -J ${personality}-job
 #BSUB -o ${personality}-job.%Jo
 #BSUB -e ${personality}-job.%Je
