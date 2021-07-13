@@ -26,7 +26,7 @@ cat > ${tmpdir}/${personality}-job <<EOF
 #!/bin/bash
 # LSF directives
 #BSUB -P CSC444
-#BSUB -W 0:10
+#BSUB -W 0:32
 #BSUB -q debug
 #BSUB -csm y
 #BSUB -n ${total_slots}
