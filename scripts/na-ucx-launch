@@ -39,3 +39,5 @@ ${dir}/${personality}-startall
 EOF
 
 bsub ${tmpdir}/${personality}-job
+
+rm -r ${tmpdir}
