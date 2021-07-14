@@ -57,6 +57,10 @@ struct na_private_context {
     hg_thread_cond_t progress_cond; /* Progress cond */
 #endif
     hg_thread_mutex_t completion_queue_mutex; /* Completion queue mutex */
+    uint64_t completion_queue_nwait;     /* Number of times consumers waited. */
+    uint64_t completion_queue_nsignal;   /* Number of times producers
+                                          * signaled.
+                                          */
 #ifdef NA_HAS_MULTI_PROGRESS
     hg_thread_mutex_t progress_mutex; /* Progress mutex */
 #endif
@@ -456,6 +460,8 @@ NA_Context_create_id(na_class_t *na_class, na_uint8_t id)
     /* Initialize completion queue mutex/cond */
     hg_thread_mutex_init(&na_private_context->completion_queue_mutex);
     hg_thread_cond_init(&na_private_context->completion_queue_cond);
+    na_private_context->completion_queue_nwait = 0;
+    na_private_context->completion_queue_nsignal = 0;
 
 #ifdef NA_HAS_MULTI_PROGRESS
     /* Initialize progress mutex/cond */
@@ -1358,18 +1364,22 @@ NA_Trigger(na_context_t *context, unsigned int timeout, unsigned int max_count,
                 hg_thread_mutex_lock(
                     &na_private_context->completion_queue_mutex);
 
-                /* Otherwise wait remaining ms */
+                /* Wait the remaining time if there are no completions
+                 * ready.
+                 */
                 if (hg_atomic_queue_is_empty(
                         na_private_context->completion_queue) &&
-                    !hg_atomic_get32(
-                        &na_private_context->backfill_queue_count) &&
-                    (hg_thread_cond_timedwait(
-                         &na_private_context->completion_queue_cond,
-                         &na_private_context->completion_queue_mutex,
-                         (unsigned int) (remaining * 1000.0)) !=
-                        HG_UTIL_SUCCESS)) {
-                    /* Timeout occurred so leave */
-                    ret = NA_TIMEOUT;
+                    hg_atomic_get32(
+                        &na_private_context->backfill_queue_count) == 0) {
+                    na_private_context->completion_queue_nwait++;
+                    if (hg_thread_cond_timedwait(
+                            &na_private_context->completion_queue_cond,
+                            &na_private_context->completion_queue_mutex,
+                            (unsigned int) (remaining * 1000.0)) !=
+                            HG_UTIL_SUCCESS) {
+                        /* Timeout occurred so leave */
+                        ret = NA_TIMEOUT;
+                    }
                 }
 
                 hg_thread_mutex_unlock(
@@ -1476,27 +1486,29 @@ na_cb_completion_add(
     struct na_private_context *na_private_context =
         (struct na_private_context *) context;
 
+    hg_thread_mutex_lock(&na_private_context->completion_queue_mutex);
     if (hg_atomic_queue_push(na_private_context->completion_queue,
             na_cb_completion_data) != HG_UTIL_SUCCESS) {
         /* Queue is full */
-        hg_thread_mutex_lock(&na_private_context->completion_queue_mutex);
         HG_QUEUE_PUSH_TAIL(
             &na_private_context->backfill_queue, na_cb_completion_data, entry);
         hg_atomic_incr32(&na_private_context->backfill_queue_count);
-        hg_thread_mutex_unlock(&na_private_context->completion_queue_mutex);
 
         which = "backfill";
     } else {
         which = "normal";
     }
 
+    /* Callback is pushed to the completion queue when something completes
+     * so wake up anyone waiting in the trigger */
+    while (na_private_context->completion_queue_nwait >
+           na_private_context->completion_queue_nsignal) {
+        na_private_context->completion_queue_nsignal++;
+        hg_thread_cond_signal(&na_private_context->completion_queue_cond);
+    }
+    hg_thread_mutex_unlock(&na_private_context->completion_queue_mutex);
+
     hlog_fast(na_completions,
         "%s: added completion %p to context %p %s queue", __func__,
         (void *)na_cb_completion_data, (void *)context, which);
-
-    /* Callback is pushed to the completion queue when something completes
-     * so wake up anyone waiting in the trigger */
-    hg_thread_mutex_lock(&na_private_context->completion_queue_mutex);
-    hg_thread_cond_signal(&na_private_context->completion_queue_cond);
-    hg_thread_mutex_unlock(&na_private_context->completion_queue_mutex);
 }
