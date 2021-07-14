@@ -1383,7 +1383,6 @@ NA_Trigger(na_context_t *context, unsigned int timeout, unsigned int max_count,
             }
         }
 
-
         hlog_fast(na_completions,
             "%s: removed completion %p from context %p %s queue", __func__,
             (void *)completion_data_ptr, (void *)context, which);
