@@ -61,7 +61,8 @@ if [ ${mpi:-no} = yes ]; then
 	pfxcmd=
 else
 	opt_s=
-	pfxcmd="timeout -s ABRT 300s"
+	# allow 10 minutes (600 seconds) for each test to complete
+	pfxcmd="timeout -s ABRT 600s"
 fi
 
 uname -a
