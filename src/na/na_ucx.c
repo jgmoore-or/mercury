@@ -1919,7 +1919,7 @@ na_ucx_msg_send(na_context_t *context,
      * just send and return.
      */
     if (cached_ctx == context->plugin_context && sender_id != sender_id_nil) {
-        op_id->status = op_s_underway;
+        hg_atomic_set32(&op_id->status, op_s_underway);
         tagged_send(cached_ctx, buf, buf_size, ep, sender_id, tag, op_id);
         return NA_SUCCESS;
     }
