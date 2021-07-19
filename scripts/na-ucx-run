@@ -29,7 +29,7 @@ export UCX_NET_DEVICES="mlx5_0:1"
 #export UCX_TLS=ud_x	# accelerated ud
 #export UCX_TLS=rc_v	# Verbs-based rc
 #export UCX_TLS=rc_x	# accelerated rc
-export UCX_TLS=rc	# any rc
+#export UCX_TLS=rc	# any rc
 #export UCX_TLS=ud	# any ud
 
 event=cycles
@@ -66,7 +66,7 @@ else
 fi
 
 uname -a
-echo parameters UCX_NET_DEVICES=${UCX_NET_DEVICES} UCX_TLS=${UCX_TLS}
+echo parameters UCX_NET_DEVICES=${UCX_NET_DEVICES}
 echo perfcmd $(perfcmd sample)
 echo nnodes $nnodes mpi ${mpi:-no} busy loop ${busy:-no}
 
@@ -92,7 +92,8 @@ other)
 	fi
 	echo "server node: starting $server for $test" 1>&2
 	$pfxcmd $(perfcmd ${test}-sv) $server -V ${opt_s} \
-	    -c $comm -p rc ${opt_b} ${opt_x} -H mlx5_0 2>&1 | sed -u 's,^,S ,'
+	    -c $comm -p ${protocol:-all} ${opt_b} ${opt_x} -H mlx5_0 | \
+	    2>&1 | sed -u 's,^,S ,'
 	echo "server rank $PMIX_RANK: ${test} complete" 1>&2
 	;;
 *)
@@ -106,8 +107,8 @@ other)
 	client=$hg_build_dir/bin/$test
 	echo "client node: starting $client for $test" 1>&2
 	$pfxcmd $(perfcmd ${test}-cl) $client -V ${opt_s} \
-	    -c $comm -p rc ${opt_b} ${opt_x} -H mlx5_0 -l 1000 2>&1 | \
-	    sed -u 's,^,C ,'
+	    -c $comm -p ${protocol:-all} ${opt_b} ${opt_x} -H mlx5_0 -l 1000 \
+	    2>&1 | sed -u 's,^,C ,'
 	echo "client rank $PMIX_RANK: ${test} complete" 1>&2
 	;;
 esac
