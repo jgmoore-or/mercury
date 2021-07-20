@@ -62,7 +62,7 @@ else
 fi
 
 uname -a
-echo parameters UCX_NET_DEVICES=${UCX_NET_DEVICES}
+echo parameters UCX_NET_DEVICES=${UCX_NET_DEVICES} protocol ${protocol:-all}
 echo perfcmd $(perfcmd sample)
 echo nnodes $nnodes mpi ${mpi:-no} busy loop ${busy:-no}
 
