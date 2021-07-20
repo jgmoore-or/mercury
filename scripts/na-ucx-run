@@ -46,10 +46,25 @@ hg_build_dir=$HOME/na-ucx/mercury/build
 
 cd $MEMBERWORK/csc444
 
+opt_x=
+opt_y=
+opt_z=
+
 if [ ${test##hg_} != ${test} ]; then
-	opt_x="-x 16"
-else
-	opt_x=
+	#
+	# Hg tests accept a parameter for the number of handles, `n`, `-x n`
+	#
+	opt_x="-x ${handles:-16}"
+	#
+	# Hg tests accept parameters for the minimum buffer size, `size`,
+	# `-y size`, and the maximum buffer size, `-z size`
+	#
+	if [ ${bufmin:-none} != none ]; then
+		opt_y="-y ${bufmin}"
+	fi
+	if [ ${bufmax:-none} != none ]; then
+		opt_z="-z ${bufmax}"
+	fi
 fi
 
 if [ ${mpi:-no} = yes ]; then
@@ -88,8 +103,8 @@ other)
 	fi
 	echo "server node: starting $server for $test" 1>&2
 	$pfxcmd $(perfcmd ${test}-sv) $server -V ${opt_s} \
-	    -c $comm -p ${protocol:-all} ${opt_b} ${opt_x} -H mlx5_0 | \
-	    2>&1 | sed -u 's,^,S ,'
+	    -c $comm -p ${protocol:-all} ${opt_b} ${opt_x} ${opt_y} ${opt_z} \
+	    -H mlx5_0 | 2>&1 | sed -u 's,^,S ,'
 	echo "server rank $PMIX_RANK: ${test} complete" 1>&2
 	;;
 *)
@@ -103,8 +118,8 @@ other)
 	client=$hg_build_dir/bin/$test
 	echo "client node: starting $client for $test" 1>&2
 	$pfxcmd $(perfcmd ${test}-cl) $client -V ${opt_s} \
-	    -c $comm -p ${protocol:-all} ${opt_b} ${opt_x} -H mlx5_0 -l 1000 \
-	    2>&1 | sed -u 's,^,C ,'
+	    -c $comm -p ${protocol:-all} ${opt_b} ${opt_x} ${opt_y} ${opt_z} \
+	    -H mlx5_0 -l 1000 2>&1 | sed -u 's,^,C ,'
 	echo "client rank $PMIX_RANK: ${test} complete" 1>&2
 	;;
 esac
