@@ -19,18 +19,14 @@ export HLOG_OUTPUT=stderr # ring
 # UCX config
 export UCX_NET_DEVICES="mlx5_0:1"
 
+# protocol              description
 #
-# Using 1.10.1,
-#
-# UCX_TLS=ud passes the NA latency test.
-# UCX_TLS=rc crashes in the NA latency test.
-#
-#export UCX_TLS=ud_v	# Verbs-based ud
-#export UCX_TLS=ud_x	# accelerated ud
-#export UCX_TLS=rc_v	# Verbs-based rc
-#export UCX_TLS=rc_x	# accelerated rc
-#export UCX_TLS=rc	# any rc
-#export UCX_TLS=ud	# any ud
+# ud_v                  Verbs-based ud
+# ud_x                  accelerated ud
+# rc_v                  Verbs-based rc
+# rc_x                  accelerated rc
+# rc                    any rc
+# ud                    any ud
 
 event=cycles
 #event=cs
