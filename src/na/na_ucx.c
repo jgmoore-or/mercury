@@ -858,6 +858,9 @@ na_ucx_initialize(na_class_t *nacl, const struct na_info *na_info,
     int rc;
 
     if (na_info->na_init_info != NULL) {
+        if (na_info->na_init_info->progress_mode & NA_NO_BLOCK) {
+            global_params.features &= ~(uint64_t)UCP_FEATURE_WAKEUP;
+        }
         /* Thread mode */
         if ((na_info->na_init_info->max_contexts > 1)
             && !(na_info->na_init_info->thread_mode & NA_THREAD_MODE_SINGLE)) {
