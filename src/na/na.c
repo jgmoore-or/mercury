@@ -1206,16 +1206,16 @@ error:
 }
 
 /*---------------------------------------------------------------------------*/
+#ifdef NA_HAS_MULTI_PROGRESS
 na_return_t
-NA_Progress(na_class_t *na_class, na_context_t *context, unsigned int timeout)
+NA_Progress(na_class_t *na_class, na_context_t *context,
+   unsigned int timeout_ms)
 {
     struct na_private_context *na_private_context =
         (struct na_private_context *) context;
     double remaining =
-        timeout / 1000.0; /* Convert timeout in ms into seconds */
-#ifdef NA_HAS_MULTI_PROGRESS
+        timeout_ms / 1000.0; /* Convert timeout in ms into seconds */
     hg_util_int32_t old, num;
-#endif
     na_return_t ret = NA_TIMEOUT;
 
     NA_CHECK_SUBSYS_ERROR(
@@ -1229,9 +1229,8 @@ NA_Progress(na_class_t *na_class, na_context_t *context, unsigned int timeout)
         NA_OPNOTSUPPORTED, "progress plugin callback is not defined");
 
     NA_LOG_SUBSYS_DEBUG(poll, "Entering progress on context (%p) for %u ms",
-        (void *) context, timeout);
+        (void *) context, timeout_ms);
 
-#ifdef NA_HAS_MULTI_PROGRESS
     hg_atomic_incr32(&na_private_context->progressing);
     for (;;) {
         hg_time_t t1, t2;
@@ -1274,24 +1273,18 @@ NA_Progress(na_class_t *na_class, na_context_t *context, unsigned int timeout)
         if (remaining < 0)
             remaining = 0;
     }
-#endif
 
     /* Something is in one of the completion queues */
     if (!hg_atomic_queue_is_empty(na_private_context->completion_queue) ||
         hg_atomic_get32(&na_private_context->backfill_queue_count)) {
         ret = NA_SUCCESS; /* Progressed */
-#ifdef NA_HAS_MULTI_PROGRESS
         goto unlock;
-#else
-        goto done;
-#endif
     }
 
     /* Try to make progress for remaining time */
     ret = na_class->ops->progress(
         na_class, context, (unsigned int) (remaining * 1000.0));
 
-#ifdef NA_HAS_MULTI_PROGRESS
 unlock:
     do {
         old = hg_atomic_get32(&na_private_context->progressing);
@@ -1304,26 +1297,50 @@ unlock:
         hg_thread_cond_signal(&na_private_context->progress_cond);
         hg_thread_mutex_unlock(&na_private_context->progress_mutex);
     }
-#endif
 
 done:
     return ret;
 }
-
-/*---------------------------------------------------------------------------*/
+#else
 na_return_t
-NA_Trigger(na_context_t *context, unsigned int timeout, unsigned int max_count,
-    int callback_ret[], unsigned int *actual_count)
+NA_Progress(na_class_t *na_class, na_context_t *context,
+    unsigned int timeout_ms)
 {
     struct na_private_context *na_private_context =
         (struct na_private_context *) context;
-    double remaining =
-        timeout / 1000.0; /* Convert timeout in ms into seconds */
+
+    NA_LOG_SUBSYS_DEBUG(poll, "Entering progress on context (%p) for %u ms",
+        (void *) context, timeout_ms);
+
+    /* Something is in one of the completion queues */
+    if (!hg_atomic_queue_is_empty(na_private_context->completion_queue) ||
+        hg_atomic_get32(&na_private_context->backfill_queue_count)) {
+        return NA_SUCCESS; /* Progressed */
+    }
+
+    /* Try to make progress for remaining time */
+    return na_class->ops->progress(na_class, context, timeout_ms);
+}
+#endif
+
+/*---------------------------------------------------------------------------*/
+na_return_t
+NA_Trigger(na_context_t *context, unsigned int timeout_ms,
+    unsigned int max_count, int callback_ret[], unsigned int *actual_count)
+{
+    hg_time_t deadline, remaining = hg_time_from_ms(timeout_ms);
+    hg_time_t now = hg_time_from_ms(0);
+    struct na_private_context *na_private_context =
+        (struct na_private_context *) context;
     na_return_t ret = NA_SUCCESS;
     unsigned int count = 0;
 
     NA_CHECK_SUBSYS_ERROR(
         op, context == NULL, done, ret, NA_INVALID_ARG, "NULL context");
+
+    if (timeout_ms != 0)
+        hg_time_get_current_ms(&now);
+    deadline = hg_time_add(now, remaining);
 
     while (count < max_count) {
         const char *which = "normal";
@@ -1347,19 +1364,15 @@ NA_Trigger(na_context_t *context, unsigned int timeout, unsigned int max_count,
                     continue; /* Give another chance to grab it */
                 which = "backfill";
             } else {
-                hg_time_t t1, t2;
-
                 /* If something was already processed leave */
                 if (count)
                     break;
 
-                /* Timeout is 0 so leave */
-                if ((int) (remaining * 1000.0) <= 0) {
+                /* Make sure that timeout of 0 enters progress */
+                if (!hg_time_less(now, deadline)) {
                     ret = NA_TIMEOUT;
                     break;
                 }
-
-                hg_time_get_current_ms(&t1);
 
                 hg_thread_mutex_lock(
                     &na_private_context->completion_queue_mutex);
@@ -1375,7 +1388,7 @@ NA_Trigger(na_context_t *context, unsigned int timeout, unsigned int max_count,
                     if (hg_thread_cond_timedwait(
                             &na_private_context->completion_queue_cond,
                             &na_private_context->completion_queue_mutex,
-                            (unsigned int) (remaining * 1000.0)) !=
+                            hg_time_to_ms(remaining)) !=
                             HG_UTIL_SUCCESS) {
                         /* Timeout occurred so leave */
                         ret = NA_TIMEOUT;
@@ -1387,8 +1400,9 @@ NA_Trigger(na_context_t *context, unsigned int timeout, unsigned int max_count,
                 if (ret == NA_TIMEOUT)
                     break;
 
-                hg_time_get_current_ms(&t2);
-                remaining -= hg_time_diff(t2, t1);
+                if (timeout_ms != 0)
+                    hg_time_get_current_ms(&now);
+                remaining = hg_time_subtract(deadline, now);
                 continue; /* Give another chance to grab it */
             }
         }
