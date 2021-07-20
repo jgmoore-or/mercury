@@ -325,6 +325,8 @@ static na_return_t na_ucx_progress_once(na_ucx_context_t *);
 static NA_INLINE na_size_t na_ucx_msg_get_header_size(const na_class_t *);
 static NA_INLINE na_size_t na_ucx_msg_get_max_size(const na_class_t *);
 static NA_INLINE na_tag_t na_ucx_msg_get_max_tag(const na_class_t *);
+static void *na_ucx_msg_buf_alloc(na_class_t *, na_size_t, void **);
+static na_return_t na_ucx_msg_buf_free(na_class_t *, void *, void *);
 
 static bool wire_event_callback(wire_event_info_t, void *);
 
@@ -358,8 +360,8 @@ const struct na_class_ops NA_PLUGIN_OPS(ucx) = {
     na_ucx_msg_get_header_size,            /* msg_get_unexpected_header_size */
     na_ucx_msg_get_header_size,            /* msg_get_expected_header_size */
     na_ucx_msg_get_max_tag,                /* msg_get_max_tag */
-    NULL,                                  /* msg_buf_alloc */
-    NULL,                                  /* msg_buf_free */
+    na_ucx_msg_buf_alloc,                  /* msg_buf_alloc */
+    na_ucx_msg_buf_free,                   /* msg_buf_free */
     NULL,                                  /* msg_init_unexpected */
     na_ucx_msg_send_unexpected,            /* msg_send_unexpected */
     na_ucx_msg_recv_unexpected,            /* msg_recv_unexpected */
@@ -2512,4 +2514,49 @@ na_ucx_msg_get_max_tag(const na_class_t *nacl)
     assert(maxtag >= 3);
 
     return maxtag;
+}
+
+static void *
+na_ucx_msg_buf_alloc(na_class_t *nacl, na_size_t size, void **plugin_data)
+{
+    const ucp_mem_map_params_t params = {
+      .field_mask = UCP_MEM_MAP_PARAM_FIELD_LENGTH |
+                    UCP_MEM_MAP_PARAM_FIELD_FLAGS
+    , .length = size
+    , .flags = UCP_MEM_MAP_ALLOCATE   // TBD experiment with _NONBLOCK?
+    };
+    ucp_mem_attr_t attr = {.field_mask = UCP_MEM_ATTR_FIELD_ADDRESS};
+    na_ucx_class_t *nucl = na_ucx_class(nacl);
+    ucp_mem_h mh;
+
+    if (nucl->ncontexts == 0)
+        return NULL;
+
+    if (ucp_mem_map(nucl->uctx, &params, &mh) != UCS_OK)
+        return NULL;
+
+    if (ucp_mem_query(mh, &attr) != UCS_OK ||
+        (attr.field_mask & UCP_MEM_ATTR_FIELD_ADDRESS) == 0) {
+        (void)ucp_mem_unmap(nucl->uctx, mh);
+        return NULL;
+    }
+
+    *plugin_data = mh;
+
+    return attr.address;
+}
+
+static na_return_t
+na_ucx_msg_buf_free(na_class_t *nacl, void NA_UNUSED *buf, void *plugin_data)
+{
+    na_ucx_class_t *nucl = na_ucx_class(nacl);
+    ucp_mem_h mh = plugin_data;
+
+    if (nucl->ncontexts == 0)
+        return NA_PROTOCOL_ERROR;
+
+    if (ucp_mem_unmap(nucl->uctx, mh) != UCS_OK)
+        return NA_PROTOCOL_ERROR;
+
+    return NA_SUCCESS;
 }
