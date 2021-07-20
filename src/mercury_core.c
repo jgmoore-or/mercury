@@ -3670,36 +3670,39 @@ done:
 
 /*---------------------------------------------------------------------------*/
 static hg_return_t
-hg_core_progress(struct hg_core_private_context *context, unsigned int timeout)
+hg_core_progress(struct hg_core_private_context *context,
+    unsigned int timeout_ms)
 {
-    double remaining =
-        timeout / 1000.0; /* Convert timeout in ms into seconds */
+    hg_time_t deadline, remaining = hg_time_from_ms(timeout_ms);
+    hg_time_t now = hg_time_from_ms(0);
     hg_return_t ret;
 
+    if (timeout_ms != 0)
+        hg_time_get_current_ms(&now);
+    deadline = hg_time_add(now, remaining);
+
     do {
-        hg_time_t t1, t2;
         hg_bool_t safe_wait = HG_FALSE, progressed = HG_FALSE;
         unsigned int poll_timeout = 0;
 
-        if (timeout)
-            hg_time_get_current_ms(&t1);
-
-        /* Bypass notifications if timeout is 0 to prevent system calls */
-        if (context->poll_set && timeout) {
+        /* Bypass notifications if timeout_ms is 0 to prevent system calls */
+        if (timeout_ms == 0) {
+            ;   // nothing to do
+        } else if (context->poll_set) {
             hg_thread_mutex_lock(&context->completion_queue_notify_mutex);
 
             if (hg_core_poll_try_wait(context)) {
                 safe_wait = HG_TRUE;
-                poll_timeout = (unsigned int) (remaining * 1000.0);
+                poll_timeout = hg_time_to_ms(remaining);
 
                 /* We need to be notified when doing blocking progress */
                 hg_atomic_set32(&context->completion_queue_must_notify, 1);
             }
             hg_thread_mutex_unlock(&context->completion_queue_notify_mutex);
-        } else if (!HG_CORE_CONTEXT_CLASS(context)->loopback && timeout &&
+        } else if (!HG_CORE_CONTEXT_CLASS(context)->loopback &&
                    hg_core_poll_try_wait(context)) {
             /* This is the case for NA plugins that don't expose a fd */
-            poll_timeout = (unsigned int) (remaining * 1000.0);
+            poll_timeout = hg_time_to_ms(remaining);
         }
 
         /* Only enter blocking wait if it is safe to */
@@ -3719,11 +3722,10 @@ hg_core_progress(struct hg_core_private_context *context, unsigned int timeout)
             (hg_atomic_get32(&context->backfill_queue_count) > 0))
             return HG_SUCCESS;
 
-        if (timeout) {
-            hg_time_get_current_ms(&t2);
-            remaining -= hg_time_diff(t2, t1);
-        }
-    } while ((int) (remaining * 1000.0) > 0);
+        if (timeout_ms != 0)
+            hg_time_get_current_ms(&now);
+        remaining = hg_time_subtract(deadline, now);
+    } while (hg_time_less(now, deadline));
 
     return HG_TIMEOUT;
 
@@ -3867,21 +3869,21 @@ done:
 /*---------------------------------------------------------------------------*/
 static hg_return_t
 hg_core_progress_na(na_class_t *na_class, na_context_t *na_context,
-    unsigned int timeout, hg_bool_t *progressed_ptr)
+    unsigned int timeout_ms, hg_bool_t *progressed_ptr)
 {
-    double remaining =
-        timeout / 1000.0; /* Convert timeout in ms into seconds */
+    hg_time_t deadline, remaining = hg_time_from_ms(timeout_ms);
+    hg_time_t now = hg_time_from_ms(0);
     unsigned int completed_count = 0;
     hg_bool_t progressed = HG_FALSE;
     hg_return_t ret = HG_SUCCESS;
 
-    do {
+    if (timeout_ms != 0)
+        hg_time_get_current_ms(&now);
+    deadline = hg_time_add(now, remaining);
+
+    for (;;) {
         unsigned int actual_count = 0;
         na_return_t na_ret;
-        hg_time_t t1, t2;
-
-        if (timeout)
-            hg_time_get_current_ms(&t1);
 
         /* Trigger everything we can from NA, if something completed it will
          * be moved to the HG context completion queue */
@@ -3907,24 +3909,24 @@ hg_core_progress_na(na_class_t *na_class, na_context_t *na_context,
         }
 
         /* Make sure that timeout of 0 enters progress */
-        if (timeout && ((int) (remaining * 1000.0) <= 0))
+        if (timeout_ms != 0 && !hg_time_less(now, deadline))
             break;
 
         /* Otherwise try to make progress on NA */
         na_ret = NA_Progress(
-            na_class, na_context, (unsigned int) (remaining * 1000.0));
+            na_class, na_context, hg_time_to_ms(remaining));
+
         if (na_ret == NA_TIMEOUT)
             break;
-        else
-            HG_CHECK_ERROR(na_ret != NA_SUCCESS, done, ret,
-                (hg_return_t) na_ret, "Could not make progress on NA (%s)",
-                NA_Error_to_string(na_ret));
 
-        if (timeout) {
-            hg_time_get_current_ms(&t2);
-            remaining -= hg_time_diff(t2, t1);
-        }
-    } while (1);
+        HG_CHECK_ERROR(na_ret != NA_SUCCESS, done, ret,
+            (hg_return_t) na_ret, "Could not make progress on NA (%s)",
+            NA_Error_to_string(na_ret));
+
+        if (timeout_ms != 0)
+            hg_time_get_current_ms(&now);
+        remaining = hg_time_subtract(deadline, now);
+    }
 
     *progressed_ptr = progressed;
 
