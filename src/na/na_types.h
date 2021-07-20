@@ -150,8 +150,14 @@ typedef int (*na_cb_t)(const struct na_cb_info *callback_info);
 
 /* NA init info initializer */
 #define NA_INIT_INFO_INITIALIZER                                               \
-    {                                                                          \
-        NULL, NULL, 0, 0, 0, 1, 0                                              \
+    (struct na_init_info){                                                     \
+        .ip_subnet = NULL,                                                     \
+        .auth_key = NULL,                                                      \
+        .max_unexpected_size = 0,                                              \
+        .max_expected_size = 0,                                                \
+        .progress_mode = 0,                                                    \
+        .max_contexts = 1,                                                     \
+        .thread_mode = NA_THREAD_MODE_SINGLE                                   \
     }
 
 #endif /* NA_TYPES_H */
