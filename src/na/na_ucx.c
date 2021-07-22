@@ -239,6 +239,7 @@ struct na_ucx_context {
         uint64_t tagmax;
     } msg;
     na_uint8_t id;
+    bool blocking;
 };
 
 struct na_ucx_class {
@@ -666,7 +667,8 @@ mask_to_shift(uint64_t mask)
 
 static na_return_t
 na_ucx_context_init(
-    na_ucx_context_t *nctx, na_ucx_class_t *nucl, ucs_thread_mode_t thread_mode)
+    na_ucx_context_t *nctx, na_ucx_class_t *nucl, ucs_thread_mode_t thread_mode,
+    bool blocking)
 {
     ucp_worker_params_t worker_params = {
       .field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE
@@ -753,6 +755,8 @@ na_ucx_context_init(
     nctx->msg.tagshift = mask_to_shift(~nctx->msg.tagmask);
     nctx->exp.tag = nctx->app.tag | expflag;
     nctx->unexp.tag = nctx->app.tag;
+
+    nctx->blocking = blocking;
 
     ucp_worker_release_address(nctx->worker, uaddr);
     return NA_SUCCESS;
@@ -855,11 +859,13 @@ na_ucx_initialize(na_class_t *nacl, const struct na_info *na_info,
         worker_thread_mode = UCS_THREAD_MODE_MULTI;
     na_return_t ret;
     ucs_status_t status;
+    bool blocking = true;
     int rc;
 
     if (na_info->na_init_info != NULL) {
         if (na_info->na_init_info->progress_mode & NA_NO_BLOCK) {
             global_params.features &= ~(uint64_t)UCP_FEATURE_WAKEUP;
+            blocking = false;
         }
         /* Thread mode */
         if ((na_info->na_init_info->max_contexts > 1)
@@ -1011,7 +1017,8 @@ na_ucx_initialize(na_class_t *nacl, const struct na_info *na_info,
         ucs_thread_mode_names[uctx_attrs.thread_mode]);
 
     /* Create single worker */
-    ret = na_ucx_context_init(&nucl->context, nucl, worker_thread_mode);
+    ret = na_ucx_context_init(&nucl->context, nucl, worker_thread_mode,
+        blocking);
     NA_CHECK_SUBSYS_NA_ERROR(
         cls, cleanup, ret, "Could not initialize UCX worker");
 
@@ -2483,7 +2490,8 @@ na_ucx_poll_get_fd(na_class_t NA_UNUSED *nacl, na_context_t *ctx)
     na_ucx_context_t *nuctx = ctx->plugin_context;
     int fd;
 
-    return (ucp_worker_get_efd(nuctx->worker, &fd) == UCS_OK) ? fd : -1;
+    return (nuctx->blocking &&
+            ucp_worker_get_efd(nuctx->worker, &fd) == UCS_OK) ? fd : -1;
 }
 
 static NA_INLINE na_bool_t
