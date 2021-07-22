@@ -69,6 +69,11 @@ struct hg_test_context_info {
 /* Public Macros */
 /*****************/
 
+/* Max */
+#ifndef MAX
+#    define MAX(a, b) (((a) > (b)) ? (a) : (b))
+#endif
+
 /* Default error macro */
 #include "mercury_log.h"
 
